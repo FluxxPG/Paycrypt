@@ -8,6 +8,11 @@ import {
   planCatalog
 } from "@cryptopay/shared";
 import { createApiKeyPair, createPaymentLinkReference, createPaymentReference } from "./keys.js";
+import { verifyMessage } from "ethers";
+import { PublicKey } from "@solana/web3.js";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
+import TronWeb from "tronweb";
 import { getBinanceDepositAddress } from "./binance.js";
 import { nanoid } from "nanoid";
 import { query, withTransaction } from "./db.js";
@@ -18,6 +23,7 @@ import {
   assertMerchantCanAcceptPayment,
   assertMerchantPlatformAccess,
   changeSubscriptionPlan,
+  getMerchantBillingContext,
   listBillingInvoices
 } from "./billing.js";
 import { AppError } from "./errors.js";
@@ -33,6 +39,7 @@ const getSelectedNonCustodialWallet = async (
   network: string
 ) => {
   const result = await query<{
+    id: string;
     address: string;
     provider: string;
   }>(
@@ -43,6 +50,7 @@ const getSelectedNonCustodialWallet = async (
        and asset = $2
        and network = $3
        and is_active = true
+       and payment_id is null
      order by is_selected desc, created_at desc
      limit 1`,
     [merchantId, asset, network]
@@ -75,39 +83,33 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
       walletType: "custodial" | "non_custodial";
       amountCrypto: number;
       exchangeRate: number;
+      sourceWalletId?: string;
     }
   > = {};
 
   for (const network of supportedRouteNetworks) {
-    if (network === "BTC") {
-      const deposit = await getBinanceDepositAddress(parsed.settlementCurrency, network);
+    const nonCustodialWallet = await getSelectedNonCustodialWallet(merchantId, parsed.settlementCurrency, network);
+    if (nonCustodialWallet) {
       walletRoutes[network] = {
         asset: parsed.settlementCurrency,
         network,
-        address: deposit.address,
-        provider: "binance",
-        walletType: "custodial",
+        address: nonCustodialWallet.address,
+        provider: nonCustodialWallet.provider ?? "merchant",
+        walletType: "non_custodial",
         amountCrypto: quote.amountCrypto,
-        exchangeRate: quote.exchangeRate
+        exchangeRate: quote.exchangeRate,
+        sourceWalletId: nonCustodialWallet.id
       };
       continue;
     }
 
-    const wallet = await getSelectedNonCustodialWallet(merchantId, parsed.settlementCurrency, network);
-    if (!wallet) {
-      throw new AppError(
-        412,
-        "wallet_not_configured",
-        `Non-custodial wallet not configured for ${parsed.settlementCurrency} on ${network}`
-      );
-    }
-
+    const deposit = await getBinanceDepositAddress(parsed.settlementCurrency, network);
     walletRoutes[network] = {
       asset: parsed.settlementCurrency,
       network,
-      address: wallet.address,
-      provider: wallet.provider ?? "merchant",
-      walletType: "non_custodial",
+      address: deposit.address,
+      provider: "binance",
+      walletType: "custodial",
       amountCrypto: quote.amountCrypto,
       exchangeRate: quote.exchangeRate
     };
@@ -150,22 +152,31 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
     );
 
     for (const [network, route] of Object.entries(walletRoutes)) {
-      await client.query(
-        `insert into wallets (
-          merchant_id, payment_id, wallet_type, provider, asset, network, address, is_active, is_selected, last_seen_at
-        ) values ($1,$2,$3,$4,$5,$6,$7,true,$8,null)
-        on conflict do nothing`,
-        [
-          merchantId,
-          paymentId,
-          route.walletType,
-          route.provider,
-          route.asset,
-          route.network,
-          route.address,
-          network === parsed.network
-        ]
-      );
+      if (route.sourceWalletId) {
+        await client.query(
+          `update wallets
+           set payment_id = $2, is_selected = $3, last_seen_at = null
+           where id = $1`,
+          [route.sourceWalletId, paymentId, network === parsed.network]
+        );
+      } else {
+        await client.query(
+          `insert into wallets (
+            merchant_id, payment_id, wallet_type, provider, asset, network, address, is_active, is_selected, last_seen_at
+          ) values ($1,$2,$3,$4,$5,$6,$7,true,$8,null)
+          on conflict do nothing`,
+          [
+            merchantId,
+            paymentId,
+            route.walletType,
+            route.provider,
+            route.asset,
+            route.network,
+            route.address,
+            network === parsed.network
+          ]
+        );
+      }
     }
 
     return paymentResult;
@@ -468,6 +479,14 @@ export const registerNonCustodialWallet = async (
     provider?: string;
   }
 ) => {
+  const [merchantResult, billingContext] = await Promise.all([
+    query<{ non_custodial_enabled: boolean }>("select non_custodial_enabled from merchants where id = $1", [merchantId]),
+    getMerchantBillingContext(merchantId)
+  ]);
+  if (!merchantResult.rows[0]?.non_custodial_enabled || !billingContext.plan.nonCustodialEnabled) {
+    throw new AppError(403, "non_custodial_not_enabled", "Non-custodial wallets require admin approval");
+  }
+
   const result = await query(
     `insert into wallets (
       merchant_id,
@@ -488,6 +507,111 @@ export const registerNonCustodialWallet = async (
     throw new AppError(409, "wallet_exists", "Wallet address already registered");
   }
   return result.rows[0];
+};
+
+export const createWalletVerification = async (
+  merchantId: string,
+  input: { asset: string; network: string; address: string }
+) => {
+  const challenge = `cryptopay_verify_${merchantId}_${Date.now()}`;
+  const result = await query(
+    `insert into non_custodial_wallet_verifications
+     (merchant_id, wallet_address, asset, network, challenge_message, status)
+     values ($1,$2,$3,$4,$5,'pending')
+     returning id, challenge_message`,
+    [merchantId, input.address, input.asset, input.network, challenge]
+  );
+  return result.rows[0];
+};
+
+export const approveWalletVerification = async (
+  verificationId: string,
+  merchantId: string
+) => {
+  const result = await query(
+    `update non_custodial_wallet_verifications
+     set status = 'verified', verified_at = now()
+     where id = $1 and merchant_id = $2
+     returning id, wallet_address, asset, network`,
+    [verificationId, merchantId]
+  );
+  if (!result.rows[0]) {
+    throw new AppError(404, "verification_not_found", "Verification not found");
+  }
+  return result.rows[0];
+};
+
+const verifyWalletSignature = async (
+  network: string,
+  address: string,
+  message: string,
+  signature: string
+) => {
+  if (network === "ERC20") {
+    const recovered = verifyMessage(message, signature);
+    return recovered.toLowerCase() === address.toLowerCase();
+  }
+
+  if (network === "SOL") {
+    const pubkey = new PublicKey(address);
+    const msg = new TextEncoder().encode(message);
+    const sigBytes = bs58.decode(signature);
+    return nacl.sign.detached.verify(msg, sigBytes, pubkey.toBytes());
+  }
+
+  if (network === "TRC20") {
+    return TronWeb.utils.crypto.verifyMessage(message, signature, address);
+  }
+
+  return false;
+};
+
+export const confirmWalletVerification = async (
+  verificationId: string,
+  merchantId: string,
+  signature: string
+) => {
+  const record = await query<{
+    id: string;
+    wallet_address: string;
+    asset: string;
+    network: string;
+    challenge_message: string;
+    status: string;
+  }>(
+    `select id, wallet_address, asset, network, challenge_message, status
+     from non_custodial_wallet_verifications
+     where id = $1 and merchant_id = $2
+     limit 1`,
+    [verificationId, merchantId]
+  );
+
+  const verification = record.rows[0];
+  if (!verification) {
+    throw new AppError(404, "verification_not_found", "Verification not found");
+  }
+  if (verification.status !== "pending") {
+    throw new AppError(409, "verification_already_processed", "Verification already processed");
+  }
+
+  const valid = await verifyWalletSignature(
+    verification.network,
+    verification.wallet_address,
+    verification.challenge_message,
+    signature
+  );
+  if (!valid) {
+    throw new AppError(400, "invalid_signature", "Signature verification failed");
+  }
+
+  const update = await query(
+    `update non_custodial_wallet_verifications
+     set status = 'verified', verified_at = now(), signature = $3
+     where id = $1 and merchant_id = $2
+     returning id, wallet_address, asset, network, status`,
+    [verificationId, merchantId, signature]
+  );
+  return update.rows[0];
 };
 
 export const getSubscriptionSummary = async (merchantId: string) => {
@@ -899,6 +1023,108 @@ export const revokeWebhookEndpointForAdmin = async (merchantId: string, endpoint
     [actorId, merchantId, JSON.stringify({ endpointId })]
   );
   return result;
+};
+
+export const listWebhookLogsForAdmin = async (merchantId?: string) =>
+  query(
+    `select
+        w.event_type,
+        w.response_status,
+        w.attempt,
+        w.delivered_at,
+        w.next_retry_at,
+        w.created_at,
+        m.id as merchant_id,
+        m.name as merchant_name
+     from webhook_logs w
+     join merchants m on m.id = w.merchant_id
+     ${merchantId ? "where w.merchant_id = $1" : ""}
+     order by w.created_at desc
+     limit 50`,
+    merchantId ? [merchantId] : []
+  ).then((res) => res.rows);
+
+export const listWalletVerificationsForAdmin = async (merchantId?: string) =>
+  query(
+    `select
+        id,
+        merchant_id,
+        wallet_address,
+        asset,
+        network,
+        challenge_message,
+        status,
+        created_at,
+        verified_at
+     from non_custodial_wallet_verifications
+     ${merchantId ? "where merchant_id = $1" : ""}
+     order by created_at desc`,
+    merchantId ? [merchantId] : []
+  ).then((res) => res.rows);
+
+export const approveWalletVerificationForAdmin = async (
+  verificationId: string,
+  merchantId: string,
+  actorId: string
+) => {
+  const result = await approveWalletVerification(verificationId, merchantId);
+  const existing = await query(
+    `select id from wallets
+     where merchant_id = $1 and wallet_type = 'non_custodial' and asset = $2 and network = $3 and address = $4
+     limit 1`,
+    [merchantId, result.asset, result.network, result.wallet_address]
+  );
+
+  if (!existing.rows[0]) {
+    const selectedResult = await query(
+      `select id from wallets
+       where merchant_id = $1 and asset = $2 and network = $3 and is_selected = true
+       limit 1`,
+      [merchantId, result.asset, result.network]
+    );
+    const shouldSelect = !selectedResult.rows[0];
+    await query(
+      `insert into wallets (
+        merchant_id, wallet_type, provider, asset, network, address, is_active, is_selected, last_seen_at
+      ) values ($1,'non_custodial','merchant',$2,$3,$4,true,$5,null)`,
+      [merchantId, result.asset, result.network, result.wallet_address, shouldSelect]
+    );
+  }
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'wallet.verification.approved',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ verificationId })]
+  );
+  return result;
+};
+
+export const listSystemAlerts = async () =>
+  query(
+    `select id, severity, source, message, metadata, resolved_at, created_at
+     from system_alerts
+     order by created_at desc
+     limit 50`
+  ).then((res) => res.rows);
+
+export const createSystemAlert = async (input: {
+  severity: "info" | "warning" | "critical";
+  source: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+}) => {
+  await query(
+    `insert into system_alerts (severity, source, message, metadata)
+     values ($1,$2,$3,$4::jsonb)`,
+    [input.severity, input.source, input.message, JSON.stringify(input.metadata ?? {})]
+  );
+};
+
+export const resolveSystemAlert = async (alertId: string) => {
+  const result = await query(
+    `update system_alerts set resolved_at = now() where id = $1 returning id`,
+    [alertId]
+  );
+  return result.rows[0] ?? null;
 };
 
 export const updateMerchantWalletAccess = async (

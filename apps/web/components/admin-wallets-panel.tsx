@@ -26,10 +26,23 @@ type Wallet = {
   confirmed_count: number;
 };
 
+type WalletVerification = {
+  id: string;
+  merchant_id: string;
+  wallet_address: string;
+  asset: string;
+  network: string;
+  challenge_message: string;
+  status: string;
+  created_at: string;
+  verified_at: string | null;
+};
+
 export const AdminWalletsPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [verifications, setVerifications] = useState<WalletVerification[]>([]);
   const [busy, setBusy] = useState(false);
 
   const selectedMerchant = useMemo(
@@ -49,6 +62,11 @@ export const AdminWalletsPanel = () => {
     apiFetch<{ data: Wallet[] }>(`/admin/merchants/${selectedMerchantId}/wallets`).then((payload) => {
       setWallets(payload.data);
     });
+    apiFetch<{ data: WalletVerification[] }>(`/admin/wallet-verifications?merchantId=${selectedMerchantId}`).then(
+      (payload) => {
+        setVerifications(payload.data);
+      }
+    );
   }, [selectedMerchantId]);
 
   const toggleNonCustodial = async (enabled: boolean) => {
@@ -127,9 +145,9 @@ export const AdminWalletsPanel = () => {
             <div key={wallet.id} className="glass-soft rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-white">
-                    {wallet.asset} • {wallet.network}
-                  </p>
+              <p className="text-white">
+                {wallet.asset} - {wallet.network}
+              </p>
                   <p className="mt-1 text-xs text-slate-500">{wallet.address}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
@@ -159,6 +177,68 @@ export const AdminWalletsPanel = () => {
           ))}
           {wallets.length === 0 ? (
             <p className="text-sm text-slate-400">No wallets yet. Create a payment to generate wallet routes.</p>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-white">Wallet verification queue</h2>
+            <p className="text-sm text-slate-400">Approve verified non-custodial wallets.</p>
+          </div>
+          <Badge>{verifications.length}</Badge>
+        </div>
+        <div className="mt-4 space-y-3 text-sm text-slate-300">
+          {verifications.map((entry) => (
+            <div key={entry.id} className="glass-soft rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+              <p className="text-white">
+                {entry.asset} - {entry.network}
+              </p>
+                  <p className="mt-1 text-xs text-slate-500">{entry.wallet_address}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                  <span className="glass-soft rounded-full px-3 py-1">{entry.status}</span>
+                  <span className="glass-soft rounded-full px-3 py-1">
+                    {new Date(entry.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={async () => {
+                      if (entry.status !== "verified") {
+                        return;
+                      }
+                      await apiFetch(`/admin/wallet-verifications/${entry.id}/approve`, {
+                        method: "POST",
+                        body: JSON.stringify({ merchantId: entry.merchant_id })
+                      });
+                      await apiFetch("/admin/merchants/" + entry.merchant_id + "/non-custodial", {
+                        method: "POST",
+                        body: JSON.stringify({ enabled: true })
+                      });
+                      const payload = await apiFetch<{ data: WalletVerification[] }>(
+                        `/admin/wallet-verifications?merchantId=${entry.merchant_id}`
+                      );
+                      setVerifications(payload.data);
+                      const walletsPayload = await apiFetch<{ data: Wallet[] }>(
+                        `/admin/merchants/${entry.merchant_id}/wallets`
+                      );
+                      setWallets(walletsPayload.data);
+                    }}
+                  >
+                    Approve
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Challenge: {entry.challenge_message}</p>
+              <p className="mt-1 text-xs text-slate-500">Status: {entry.status}</p>
+            </div>
+          ))}
+          {verifications.length === 0 ? (
+            <p className="text-sm text-slate-400">No pending verifications.</p>
           ) : null}
         </div>
       </Card>

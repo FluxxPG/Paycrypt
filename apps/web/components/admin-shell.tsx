@@ -14,6 +14,7 @@ const adminNav = [
   { href: "/admin/wallets", label: "Wallets", icon: Wallet },
   { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
   { href: "/admin/webhooks", label: "Webhooks", icon: Webhook },
+  { href: "/admin/system", label: "System", icon: ShieldCheck },
   { href: "/admin/revenue", label: "Revenue", icon: Gauge },
   { href: "/admin/risk", label: "Risk & Alerts", icon: AlertTriangle }
 ];

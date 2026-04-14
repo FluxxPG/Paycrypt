@@ -238,6 +238,54 @@ create table if not exists audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists worker_heartbeats (
+  id uuid primary key default gen_random_uuid(),
+  worker_name text not null,
+  status text not null default 'online',
+  last_seen_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create unique index if not exists worker_heartbeats_name_idx on worker_heartbeats(worker_name);
+
+create table if not exists non_custodial_wallet_verifications (
+  id uuid primary key default gen_random_uuid(),
+  merchant_id text not null references merchants(id) on delete cascade,
+  wallet_address text not null,
+  asset text not null,
+  network text not null,
+  challenge_message text not null,
+  signature text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  verified_at timestamptz
+);
+
+create index if not exists non_custodial_wallet_verifications_idx on non_custodial_wallet_verifications(merchant_id, wallet_address);
+
+create table if not exists system_alerts (
+  id uuid primary key default gen_random_uuid(),
+  severity text not null,
+  source text not null,
+  message text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists system_alerts_created_idx on system_alerts(created_at desc);
+
+create table if not exists ws_health (
+  id uuid primary key default gen_random_uuid(),
+  node_id text not null,
+  clients_connected integer not null default 0,
+  latency_ms integer not null default 0,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists ws_health_node_idx on ws_health(node_id);
+
 insert into merchants (id, name, slug, email, non_custodial_enabled)
 values
   ('mrc_demo', 'Nebula Commerce', 'nebula-commerce', 'owner@nebula.dev', false),

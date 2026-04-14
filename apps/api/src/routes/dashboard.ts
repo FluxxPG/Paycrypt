@@ -10,12 +10,17 @@ import {
   listTransactions,
   listSettlements,
   listWallets,
+  createWalletVerification,
+  confirmWalletVerification,
+  approveWalletVerification,
+  registerNonCustodialWallet,
   revokeApiKey,
   revokeWebhookEndpoint,
   rotateApiSecretKey,
   rotateWebhookEndpointSecret,
   updateMerchantSubscription
 } from "../lib/services.js";
+import { supportedAssets, supportedNetworks } from "@cryptopay/shared";
 
 export const dashboardRouter = Router();
 
@@ -88,9 +93,57 @@ dashboardRouter.get("/wallets", async (req, res) => {
   res.json({ data: await listWallets(merchantId) });
 });
 
+dashboardRouter.post("/wallets", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { asset, network, address, provider } = req.body as {
+    asset: string;
+    network: string;
+    address: string;
+    provider?: string;
+  };
+
+  if (!supportedAssets.includes(asset as any) || !supportedNetworks.includes(network as any)) {
+    return res.status(400).json({ message: "Unsupported asset or network" });
+  }
+  if (network === "BTC") {
+    return res.status(400).json({ message: "BTC is custodial-only; register a TRC20, ERC20, or SOL wallet." });
+  }
+
+  const responsePayload = await registerNonCustodialWallet(merchantId, { asset, network, address, provider });
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/wallets/verify", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { asset, network, address } = req.body as {
+    asset: string;
+    network: string;
+    address: string;
+  };
+  const responsePayload = await createWalletVerification(merchantId, { asset, network, address });
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/wallets/verify/:id/approve", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await approveWalletVerification(req.params.id, merchantId);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.post("/wallets/verify/:id/confirm", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { signature } = req.body as { signature: string };
+  const responsePayload = await confirmWalletVerification(req.params.id, merchantId, signature);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
 dashboardRouter.get("/reports", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const [dailyPayments, statusBreakdown, webhookSummary, webhookLogs, usageLogs, transactions, auditLogs] =
+  const [dailyPayments, statusBreakdown, webhookSummary, webhookLogs, usageLogs, transactions, auditLogs, failedPayments] =
     await Promise.all([
       query<{ day: string; count: number; volume: string }>(
         `select date_trunc('day', created_at)::date as day, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as volume
@@ -148,6 +201,14 @@ dashboardRouter.get("/reports", async (req, res) => {
          order by created_at desc
          limit 20`,
         [merchantId]
+      ),
+      query(
+        `select id, status, created_at
+         from payments
+         where merchant_id = $1 and status = 'failed'
+         order by created_at desc
+         limit 10`,
+        [merchantId]
       )
     ]);
 
@@ -158,7 +219,8 @@ dashboardRouter.get("/reports", async (req, res) => {
     webhookLogs: webhookLogs.rows,
     usageLogs: usageLogs.rows,
     transactions: transactions.rows,
-    auditLogs: auditLogs.rows
+    auditLogs: auditLogs.rows,
+    failedPayments: failedPayments.rows
   });
 });
 

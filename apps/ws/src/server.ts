@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import Redis from "ioredis";
 import { Server } from "socket.io";
 import type { RealtimePaymentEvent } from "@cryptopay/shared";
+import { Pool } from "pg";
 
 config();
 
@@ -13,6 +14,8 @@ const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: null
 });
 const instanceId = randomUUID();
+const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const wsNodeId = process.env.WS_NODE_ID ?? instanceId;
 
 const sendJson = (statusCode: number, payload: Record<string, unknown>, res: ServerResponse<IncomingMessage>) => {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -49,6 +52,25 @@ const io = new Server(server, {
     origin: "*"
   }
 });
+
+const reportHealth = async () => {
+  try {
+    const start = Date.now();
+    await redis.ping();
+    const latencyMs = Date.now() - start;
+    await db.query(
+      `insert into ws_health (node_id, clients_connected, latency_ms, last_seen_at)
+       values ($1,$2,$3,now())
+       on conflict (node_id) do update set
+         clients_connected = excluded.clients_connected,
+         latency_ms = excluded.latency_ms,
+         last_seen_at = now()`,
+      [wsNodeId, io.engine.clientsCount, latencyMs]
+    );
+  } catch (error) {
+    console.error("Failed to report WS health", error);
+  }
+};
 
 io.on("connection", (socket) => {
   socket.on("merchant:join", (merchantId: string) => {
@@ -99,6 +121,9 @@ const shutdown = async (signal: string) => {
   await redis.quit().catch((error) => {
     console.error("Failed to close redis connection", error);
   });
+  await db.end().catch((error) => {
+    console.error("Failed to close DB pool", error);
+  });
   process.exit(0);
 };
 
@@ -109,3 +134,7 @@ process.once("SIGTERM", () => {
 process.once("SIGINT", () => {
   void shutdown("SIGINT");
 });
+
+setInterval(() => {
+  void reportHealth();
+}, 15000);

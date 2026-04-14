@@ -92,3 +92,23 @@ export const readTelemetrySnapshot = async () => {
     workerJobsFailedTotal: toNumber(values.workerJobsFailedTotal)
   };
 };
+
+export const recordQueueLatency = async (queue: string, latencyMs: number) => {
+  const key = `queue_latency:${queue}`;
+  await redis.lpush(key, String(latencyMs));
+  await redis.ltrim(key, 0, 99);
+  await redis.expire(key, 60 * 60 * 24);
+};
+
+export const readQueueLatency = async (queue: string) => {
+  const key = `queue_latency:${queue}`;
+  const values = await redis.lrange(key, 0, 99);
+  const samples = values.map((val) => Number(val)).filter((val) => !Number.isNaN(val));
+  if (!samples.length) {
+    return { avg: 0, p95: 0 };
+  }
+  const sorted = [...samples].sort((a, b) => a - b);
+  const avg = Math.round(samples.reduce((sum, val) => sum + val, 0) / samples.length);
+  const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? sorted[sorted.length - 1] ?? 0;
+  return { avg, p95 };
+};

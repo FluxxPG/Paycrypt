@@ -11,6 +11,7 @@ const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: null
 });
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const workerName = process.env.WORKER_NAME ?? "cryptopay-worker";
 
 type QueueMode = "bullmq" | "fallback";
 type QueueName =
@@ -546,6 +547,13 @@ const startBullMqWorkers = async () => {
         console.error("Failed to record worker failure telemetry", error)
       );
     });
+    worker.on("active", (job) => {
+      const latency = Date.now() - job.timestamp;
+      void redis.lpush(`queue_latency:${job.queueName}`, String(latency))
+        .then(() => redis.ltrim(`queue_latency:${job.queueName}`, 0, 99))
+        .then(() => redis.expire(`queue_latency:${job.queueName}`, 60 * 60 * 24))
+        .catch((error) => console.error("Failed to record queue latency", error));
+    });
   }
 };
 
@@ -647,6 +655,18 @@ const shutdown = async (signal: string) => {
   process.exit(0);
 };
 
+const heartbeat = async () => {
+  await db.query(
+    `insert into worker_heartbeats (worker_name, status, last_seen_at, metadata)
+     values ($1,'online',now(),$2::jsonb)
+     on conflict (worker_name) do update set
+       status = 'online',
+       last_seen_at = now(),
+       metadata = excluded.metadata`,
+    [workerName, JSON.stringify({ mode: await getQueueMode() })]
+  );
+};
+
 process.once("SIGTERM", () => {
   void shutdown("SIGTERM");
 });
@@ -659,3 +679,7 @@ void bootstrap().catch((error) => {
   console.error("Failed to start worker cluster", error);
   process.exitCode = 1;
 });
+
+setInterval(() => {
+  heartbeat().catch((error) => console.error("Heartbeat failed", error));
+}, 15000);

@@ -25,10 +25,22 @@ type WebhookRow = {
   merchant_email: string;
 };
 
+type WebhookLog = {
+  event_type: string;
+  response_status: number | null;
+  attempt: number;
+  delivered_at: string | null;
+  next_retry_at: string | null;
+  created_at: string;
+  merchant_id: string;
+  merchant_name: string;
+};
+
 export const AdminWebhooksPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
   const [endpoints, setEndpoints] = useState<WebhookRow[]>([]);
+  const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [busy, setBusy] = useState(false);
   const [latestSecret, setLatestSecret] = useState<string | null>(null);
 
@@ -44,6 +56,13 @@ export const AdminWebhooksPanel = () => {
     setEndpoints(payload.data);
   };
 
+  const loadLogs = async (merchantId?: string) => {
+    const payload = await apiFetch<{ data: WebhookLog[] }>(
+      merchantId ? `/admin/webhook-logs?merchantId=${merchantId}` : "/admin/webhook-logs"
+    );
+    setLogs(payload.data);
+  };
+
   useEffect(() => {
     apiFetch<{ data: Merchant[] }>("/admin/merchants").then((payload) => {
       setMerchants(payload.data);
@@ -53,6 +72,7 @@ export const AdminWebhooksPanel = () => {
 
   useEffect(() => {
     void loadEndpoints(selectedMerchantId || undefined);
+    void loadLogs(selectedMerchantId || undefined);
   }, [selectedMerchantId]);
 
   const toggleActive = async (endpointId: string, isActive: boolean) => {
@@ -171,6 +191,36 @@ export const AdminWebhooksPanel = () => {
           {endpoints.length === 0 ? (
             <p className="text-sm text-slate-400">No endpoints registered.</p>
           ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-white">Webhook delivery logs</h2>
+            <p className="text-sm text-slate-400">Recent webhook attempts and retry schedule.</p>
+          </div>
+          <Badge>{logs.length}</Badge>
+        </div>
+        <div className="mt-4 space-y-3 text-sm text-slate-300">
+          {logs.map((log) => (
+            <div key={`${log.event_type}-${log.created_at}`} className="glass-soft rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-white">{log.event_type}</p>
+                  <p className="mt-1 text-xs text-slate-500">{log.merchant_name}</p>
+                </div>
+                <div className="text-xs text-slate-400">
+                  Status {log.response_status ?? "n/a"} • Attempt {log.attempt}
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                {new Date(log.created_at).toLocaleString()}{" "}
+                {log.next_retry_at ? `• Retry ${new Date(log.next_retry_at).toLocaleString()}` : ""}
+              </p>
+            </div>
+          ))}
+          {logs.length === 0 ? <p className="text-sm text-slate-400">No logs yet.</p> : null}
         </div>
       </Card>
     </div>

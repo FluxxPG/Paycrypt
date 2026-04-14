@@ -8,6 +8,12 @@ type BinanceDepositAddress = {
   network?: string;
 };
 
+type BinanceBalance = {
+  asset: string;
+  free: string;
+  locked: string;
+};
+
 const baseUrl = env.BINANCE_BASE_URL ?? "https://api.binance.com";
 
 const signedRequest = async <T>(path: string, params: Record<string, string | number | undefined>) => {
@@ -52,4 +58,17 @@ export const getBinanceDepositAddress = async (asset: string, network: string): 
     coin: asset,
     network: binanceNetwork
   });
+};
+
+export const getBinanceBalances = async () => {
+  const response = await signedRequest<{ balances: BinanceBalance[] }>("/sapi/v3/asset/getUserAsset", {});
+  return response.balances ?? [];
+};
+
+export const getBinanceDepositHistory = async (asset?: string) => {
+  const response = await signedRequest<Array<{ amount: string; coin: string; address?: string; txId?: string; status?: number }>>(
+    "/sapi/v1/capital/deposit/hisrec",
+    asset ? { coin: asset } : {}
+  );
+  return response ?? [];
 };

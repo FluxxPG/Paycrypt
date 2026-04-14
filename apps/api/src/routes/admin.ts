@@ -2,7 +2,9 @@ import { Router } from "express";
 import { query } from "../lib/db.js";
 import { queues } from "../lib/queue.js";
 import { requireAdmin, requireJwt } from "../lib/middleware.js";
-import { readTelemetrySnapshot } from "../lib/telemetry.js";
+import { readQueueLatency, readTelemetrySnapshot } from "../lib/telemetry.js";
+import { getBinanceBalances, getBinanceDepositHistory } from "../lib/binance.js";
+import { redis } from "../lib/redis.js";
 import {
   createMerchantForAdmin,
   disableMerchantForAdmin,
@@ -12,6 +14,8 @@ import {
   listMerchantsForAdmin,
   listSubscriptionsForAdmin,
   listWebhookEndpointsForAdmin,
+  listWebhookLogsForAdmin,
+  listWalletVerificationsForAdmin,
   listWalletsForAdmin,
   createApiKeysForAdmin,
   rotateApiKeyForAdmin,
@@ -19,6 +23,10 @@ import {
   rotateWebhookEndpointForAdmin,
   revokeWebhookEndpointForAdmin,
   toggleWebhookEndpointForAdmin,
+  approveWalletVerificationForAdmin,
+  listSystemAlerts,
+  createSystemAlert,
+  resolveSystemAlert,
   updateMerchantForAdmin,
   updateMerchantSubscription,
   updateMerchantWalletAccess,
@@ -166,6 +174,35 @@ adminRouter.delete("/api-keys/:id", requireAdmin(true), async (req, res) => {
 adminRouter.get("/webhooks", async (req, res) => {
   const merchantId = req.query.merchantId as string | undefined;
   res.json({ data: await listWebhookEndpointsForAdmin(merchantId) });
+});
+
+adminRouter.get("/webhook-logs", async (req, res) => {
+  const merchantId = req.query.merchantId as string | undefined;
+  res.json({ data: await listWebhookLogsForAdmin(merchantId) });
+});
+
+adminRouter.get("/wallet-verifications", async (req, res) => {
+  const merchantId = req.query.merchantId as string | undefined;
+  res.json({ data: await listWalletVerificationsForAdmin(merchantId) });
+});
+
+adminRouter.post("/wallet-verifications/:id/approve", requireAdmin(true), async (req, res) => {
+  const { merchantId } = req.body as { merchantId: string };
+  const responsePayload = await approveWalletVerificationForAdmin(req.params.id, merchantId, (req as any).actor.userId);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+adminRouter.get("/alerts", async (_req, res) => {
+  res.json({ data: await listSystemAlerts() });
+});
+
+adminRouter.post("/alerts/:id/resolve", requireAdmin(true), async (req, res) => {
+  const result = await resolveSystemAlert(req.params.id);
+  if (!result) {
+    return res.status(404).json({ message: "Alert not found" });
+  }
+  res.json({ success: true });
 });
 
 adminRouter.patch("/webhooks/:id", requireAdmin(true), async (req, res) => {
@@ -319,13 +356,148 @@ adminRouter.get("/risk", async (_req, res) => {
     readTelemetrySnapshot()
   ]);
 
+  const queueLatency = {
+    confirmations: await readQueueLatency("payment-confirmation-checker"),
+    webhooks: await readQueueLatency("webhook-dispatcher"),
+    settlements: await readQueueLatency("settlement-processor")
+  };
+
+  const alertChecks = [
+    { key: "confirmations", p95: queueLatency.confirmations.p95, threshold: 60000 },
+    { key: "webhooks", p95: queueLatency.webhooks.p95, threshold: 30000 },
+    { key: "settlements", p95: queueLatency.settlements.p95, threshold: 60000 }
+  ];
+  for (const alert of alertChecks) {
+    if (alert.p95 > alert.threshold) {
+      await createSystemAlert({
+        severity: "warning",
+        source: "queues",
+        message: `${alert.key} queue latency high`,
+        metadata: { p95: alert.p95 }
+      });
+    }
+  }
+
   res.json({
     queues: {
       confirmations: queueCounts[0],
       webhooks: queueCounts[1],
       settlements: queueCounts[2]
     },
+    queueLatency,
     webhookSummary: webhookSummary.rows[0] ?? { total: 0, delivered: 0, failed: 0 },
     telemetry
   });
+});
+
+adminRouter.get("/risk/merchants", async (_req, res) => {
+  const result = await query(
+    `select
+        m.id,
+        m.name,
+        count(*) filter (where p.status = 'failed')::int as failed_payments,
+        count(*) filter (where p.status = 'pending')::int as pending_payments,
+        count(*) filter (where p.status = 'confirmed')::int as confirmed_payments,
+        count(*)::int as total_payments
+     from merchants m
+     left join payments p on p.merchant_id = m.id and p.created_at >= now() - interval '30 days'
+     group by m.id
+     order by failed_payments desc, pending_payments desc`
+  );
+  res.json({ data: result.rows });
+});
+
+adminRouter.get("/system", async (_req, res) => {
+  const dbResult = await query("select 1 as ok");
+  const redisResult = await redis.ping();
+  const queueCounts = await Promise.all([
+    queues.confirmations.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
+    queues.webhooks.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
+    queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed")
+  ]);
+
+  res.json({
+    uptimeSeconds: process.uptime(),
+    memory: process.memoryUsage(),
+    db: { ok: !!dbResult.rows[0] },
+    redis: { ok: redisResult === "PONG" },
+    queues: {
+      confirmations: queueCounts[0],
+      webhooks: queueCounts[1],
+      settlements: queueCounts[2]
+    }
+  });
+});
+
+adminRouter.get("/ws-latency", async (_req, res) => {
+  const nodes = await query(
+    `select node_id, latency_ms, clients_connected, last_seen_at
+     from ws_health
+     order by last_seen_at desc`
+  );
+  res.json({ data: nodes.rows });
+});
+
+adminRouter.get("/workers", async (_req, res) => {
+  const workers = await query(
+    `select worker_name, status, last_seen_at, metadata
+     from worker_heartbeats
+     order by last_seen_at desc`
+  );
+  res.json({ data: workers.rows });
+});
+
+adminRouter.get("/ws-health", async (_req, res) => {
+  const ws = await query(
+    `select node_id, clients_connected, latency_ms, last_seen_at
+     from ws_health
+     order by last_seen_at desc`
+  );
+  for (const node of ws.rows) {
+    if (Number(node.latency_ms ?? 0) > 150) {
+      await createSystemAlert({
+        severity: "warning",
+        source: "websocket",
+        message: "WebSocket Redis latency elevated",
+        metadata: { nodeId: node.node_id, latencyMs: node.latency_ms }
+      });
+    }
+  }
+  res.json({ data: ws.rows });
+});
+
+adminRouter.get("/custody", requireAdmin(true), async (_req, res) => {
+  try {
+    const balances = await getBinanceBalances();
+    const lowBalances = balances.filter((bal) => Number(bal.free) < 0.01);
+    const criticalBalances = balances.filter((bal) => Number(bal.free) < 0.001);
+    if (criticalBalances.length) {
+      await createSystemAlert({
+        severity: "critical",
+        source: "binance",
+        message: "Critical custodial balance detected",
+        metadata: { assets: criticalBalances.map((bal) => bal.asset) }
+      });
+    } else if (lowBalances.length) {
+      await createSystemAlert({
+        severity: "warning",
+        source: "binance",
+        message: "Low custodial balance detected",
+        metadata: { assets: lowBalances.map((bal) => bal.asset) }
+      });
+    }
+    res.json({ balances });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch Binance balances", error: (error as Error).message });
+  }
+});
+
+adminRouter.get("/custody/deposits", requireAdmin(true), async (req, res) => {
+  try {
+    const asset = req.query.asset as string | undefined;
+    const deposits = await getBinanceDepositHistory(asset);
+    res.json({ deposits });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch Binance deposits", error: (error as Error).message });
+  }
 });

@@ -26,6 +26,10 @@ type WalletRow = {
 export const WalletsPanel = () => {
   const [wallets, setWallets] = useState<WalletRow[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [form, setForm] = useState({ asset: "USDT", network: "TRC20", address: "", provider: "trust" });
+  const [verification, setVerification] = useState<{ id: string; message: string } | null>(null);
+  const [signature, setSignature] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +88,94 @@ export const WalletsPanel = () => {
           <div className="glass-soft rounded-2xl p-4 text-sm text-slate-300">
             Non-custodial: <span className="text-white">{summary.nonCustodial}</span>
           </div>
+        </div>
+        <div className="mt-6 border-t border-white/5 pt-6">
+          <p className="text-sm font-medium text-white">Register non-custodial wallet</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Requires admin approval. Use TRC20, ERC20, or SOL addresses.
+          </p>
+          <div className="mt-4 grid gap-3">
+            <select
+              value={form.asset}
+              onChange={(event) => setForm((prev) => ({ ...prev, asset: event.target.value }))}
+              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+            >
+              {["USDT", "ETH"].map((asset) => (
+                <option key={asset} value={asset} className="bg-slate-900">
+                  {asset}
+                </option>
+              ))}
+            </select>
+            <select
+              value={form.network}
+              onChange={(event) => setForm((prev) => ({ ...prev, network: event.target.value }))}
+              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+            >
+              {["TRC20", "ERC20", "SOL"].map((network) => (
+                <option key={network} value={network} className="bg-slate-900">
+                  {network}
+                </option>
+              ))}
+            </select>
+            <input
+              value={form.provider}
+              onChange={(event) => setForm((prev) => ({ ...prev, provider: event.target.value }))}
+              placeholder="Wallet provider (e.g. Trust Wallet)"
+              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+            />
+            <input
+              value={form.address}
+              onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))}
+              placeholder="Wallet address"
+              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+            />
+            <Button
+              onClick={async () => {
+                if (!form.address) return;
+                setSaving(true);
+                try {
+                  const payload = await apiFetch<{ id: string; challenge_message: string }>("/dashboard/wallets/verify", {
+                    method: "POST",
+                    body: JSON.stringify(form)
+                  });
+                  setVerification({ id: payload.id, message: payload.challenge_message });
+                  setForm((prev) => ({ ...prev, address: "" }));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Add wallet"}
+            </Button>
+          </div>
+          {verification ? (
+            <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
+              Sign this message in your wallet and send it to support:
+              <div className="mt-2 break-all font-mono text-emerald-200">{verification.message}</div>
+              <div className="mt-3 grid gap-2">
+                <input
+                  value={signature}
+                  onChange={(event) => setSignature(event.target.value)}
+                  placeholder="Paste signature"
+                  className="glass-soft w-full rounded-xl px-4 py-3 text-xs text-slate-100 outline-none"
+                />
+                <Button
+                  onClick={async () => {
+                    if (!verification || !signature) return;
+                    await apiFetch(`/dashboard/wallets/verify/${verification.id}/confirm`, {
+                      method: "POST",
+                      body: JSON.stringify({ signature })
+                    });
+                    setSignature("");
+                    setVerification(null);
+                  }}
+                >
+                  Verify signature
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </Card>
 

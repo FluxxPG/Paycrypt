@@ -21,7 +21,9 @@ const schema = z.object({
   BINANCE_BASE_URL: z.string().url().optional(),
   TRONGRID_BASE_URL: z.string().url().optional(),
   ETHEREUM_RPC_URL: z.string().url().optional(),
-  SOLANA_RPC_URL: z.string().url().optional()
+  SOLANA_RPC_URL: z.string().url().optional(),
+  WS_NODE_ID: z.string().optional(),
+  WORKER_NAME: z.string().optional()
 });
 
 export const env = schema.parse(process.env);

@@ -19,6 +19,11 @@ type RiskPayload = {
     webhooks: QueueCounts;
     settlements: QueueCounts;
   };
+  queueLatency: {
+    confirmations: { avg: number; p95: number };
+    webhooks: { avg: number; p95: number };
+    settlements: { avg: number; p95: number };
+  };
   webhookSummary: { total: number; delivered: number; failed: number };
   telemetry: {
     httpRequestsTotal: number;
@@ -35,13 +40,18 @@ type RiskPayload = {
 
 export const AdminRiskPanel = () => {
   const [payload, setPayload] = useState<RiskPayload | null>(null);
+  const [merchantRisk, setMerchantRisk] = useState<
+    Array<{ id: string; name: string; failed_payments: number; pending_payments: number; confirmed_payments: number; total_payments: number }>
+  >([]);
 
   useEffect(() => {
     let mounted = true;
-    apiFetch<RiskPayload>("/admin/risk").then((data) => {
-      if (!mounted) return;
-      setPayload(data);
-    });
+    Promise.all([apiFetch<RiskPayload>("/admin/risk"), apiFetch<{ data: typeof merchantRisk }>("/admin/risk/merchants")])
+      .then(([riskPayload, merchantPayload]) => {
+        if (!mounted) return;
+        setPayload(riskPayload);
+        setMerchantRisk(merchantPayload.data);
+      });
     return () => {
       mounted = false;
     };
@@ -120,6 +130,21 @@ export const AdminRiskPanel = () => {
               </div>
             ))}
           </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {(
+              [
+                ["confirmations", payload.queueLatency.confirmations],
+                ["webhooks", payload.queueLatency.webhooks],
+                ["settlements", payload.queueLatency.settlements]
+              ] as const
+            ).map(([label, latency]) => (
+              <div key={label} className="glass-soft rounded-2xl p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">{label} latency</p>
+                <p className="mt-2 text-sm text-white">avg {latency.avg} ms</p>
+                <p className="text-xs text-slate-400">p95 {latency.p95} ms</p>
+              </div>
+            ))}
+          </div>
         </Card>
 
         <Card>
@@ -172,6 +197,34 @@ export const AdminRiskPanel = () => {
             <p className="text-xs uppercase tracking-wide text-slate-500">Rate limited</p>
             <p className="mt-2 text-2xl font-semibold text-white">{payload.telemetry.rateLimitedTotal}</p>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-white">Merchant risk heat-map</h2>
+            <p className="text-sm text-slate-400">Failed vs pending payments by merchant (30 days).</p>
+          </div>
+          <Badge>{merchantRisk.length}</Badge>
+        </div>
+        <div className="mt-4 space-y-3 text-sm text-slate-300">
+          {merchantRisk.map((merchant) => (
+            <div key={merchant.id} className="glass-soft rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-white">{merchant.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">Total payments: {merchant.total_payments}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                  <span className="glass-soft rounded-full px-3 py-1">Failed {merchant.failed_payments}</span>
+                  <span className="glass-soft rounded-full px-3 py-1">Pending {merchant.pending_payments}</span>
+                  <span className="glass-soft rounded-full px-3 py-1">Confirmed {merchant.confirmed_payments}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {merchantRisk.length === 0 ? <p className="text-sm text-slate-400">No data yet.</p> : null}
         </div>
       </Card>
     </div>

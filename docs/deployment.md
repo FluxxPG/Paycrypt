@@ -25,12 +25,16 @@
   - `TRONGRID_BASE_URL`
   - `ETHEREUM_RPC_URL`
   - `SOLANA_RPC_URL`
+  - `WS_NODE_ID`
+  - `WORKER_NAME`
   - wallet provider credentials
 - Run `docker compose up -d --build`
 - Expose the API container on port `4000` directly or front it with an AWS Application Load Balancer
 - Expose the realtime gateway on port `4001` directly or keep it private behind the same security group
 - Terminate TLS outside the container stack if you need HTTPS, for example at the ALB or CloudFront edge
 - Use Redis 6/7 with Lua scripting enabled (BullMQ requires Lua).
+ - Configure a dedicated Binance API key with `Enable Spot & Margin Trading` + `Enable Withdrawals` (if settlement requires).
+ - Whitelist your EC2 IP in Binance API settings if IP restrictions are enabled.
 
 ## Supabase
 

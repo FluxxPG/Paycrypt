@@ -6,8 +6,9 @@ type PaymentRow = {
   settlement_currency: string;
   network: string;
   wallet_address: string;
-  wallet_routes: Record<string, { asset: string; network: string; address: string }>;
+  wallet_routes: Record<string, { asset: string; network: string; address: string; provider?: string; walletType?: string }>;
   status: string;
+  amount_crypto?: string;
 };
 
 type ProviderObservation = {
@@ -52,10 +53,27 @@ const jsonRpc = async <T>(url: string, method: string, params: unknown[] = []) =
 };
 
 const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
+  if (payment.settlement_currency === "ETH") {
+    const balanceHex = await jsonRpc<string>(ethereumRpcUrl, "eth_getBalance", [payment.wallet_address, "latest"]);
+    const balance = Number(BigInt(balanceHex)) / 1e18;
+    const expected = Number(payment.amount_crypto ?? 0);
+    if (balance >= expected && expected > 0) {
+      return {
+        txHash: "native",
+        confirmations: confirmationThresholds.ERC20,
+        status: "confirmed"
+      };
+    }
+    return null;
+  }
+
   const topicAddress = `0x${payment.wallet_address.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+  const latestBlockHex = await jsonRpc<string>(ethereumRpcUrl, "eth_blockNumber");
+  const latestBlock = BigInt(latestBlockHex);
+  const fromBlock = `0x${(latestBlock > 5000n ? latestBlock - 5000n : 0n).toString(16)}`;
   const logs = await jsonRpc<Array<{ transactionHash: string; blockNumber: string }>>(ethereumRpcUrl, "eth_getLogs", [
     {
-      fromBlock: "0x0",
+      fromBlock,
       toBlock: "latest",
       address: erc20UsdtContract,
       topics: [transferTopic, null, topicAddress]
@@ -66,8 +84,6 @@ const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation
     return null;
   }
 
-  const latestBlockHex = await jsonRpc<string>(ethereumRpcUrl, "eth_blockNumber");
-  const latestBlock = BigInt(latestBlockHex);
   const blockNumber = BigInt(latestLog.blockNumber);
   const confirmations = Number(latestBlock - blockNumber + 1n);
 
@@ -81,7 +97,7 @@ const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation
 const monitorSolana = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
   const signatures = await jsonRpc<
     Array<{ signature: string; confirmations: number | null; confirmationStatus?: "processed" | "confirmed" | "finalized" }>
-  >(solanaRpcUrl, "getSignaturesForAddress", [payment.wallet_address, { limit: 10 }]);
+  >(solanaRpcUrl, "getSignaturesForAddress", [payment.wallet_address, { limit: 20 }]);
   const signature = signatures[0];
   if (!signature) return null;
 
@@ -104,14 +120,16 @@ const monitorSolana = async (payment: PaymentRow): Promise<ProviderObservation |
 
 const monitorTron = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
   const response = await fetch(
-    `${tronBaseUrl}/v1/accounts/${payment.wallet_address}/transactions/trc20?only_confirmed=false&limit=10`
+    `${tronBaseUrl}/v1/accounts/${payment.wallet_address}/transactions/trc20?only_confirmed=false&limit=50`
   );
   if (!response.ok) {
     throw new Error(`TronGrid request failed: ${response.status}`);
   }
 
-  const payload = (await response.json()) as { data?: Array<{ transaction_id: string; confirmed?: boolean }> };
-  const tx = payload.data?.[0];
+  const payload = (await response.json()) as {
+    data?: Array<{ transaction_id: string; confirmed?: boolean; value?: string; token_info?: { symbol?: string } }>;
+  };
+  const tx = payload.data?.find((item) => item.token_info?.symbol === payment.settlement_currency) ?? payload.data?.[0];
   if (!tx) return null;
 
   return {
@@ -142,8 +160,18 @@ const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation 
     throw new Error(`Binance request failed: ${response.status}`);
   }
 
-  const deposits = (await response.json()) as Array<{ txId?: string; status?: number; coin?: string; amount?: string }>;
-  const match = deposits.find((item) => String(item.coin ?? "") === payment.settlement_currency);
+  const deposits = (await response.json()) as Array<{
+    txId?: string;
+    status?: number;
+    coin?: string;
+    address?: string;
+    amount?: string;
+  }>;
+  const match = deposits.find(
+    (item) =>
+      String(item.coin ?? "") === payment.settlement_currency &&
+      String(item.address ?? "") === payment.wallet_address
+  );
   if (!match?.txId) return null;
 
   const confirmed = match.status === 1 || match.status === 6 || match.status === undefined;
@@ -155,6 +183,11 @@ const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation 
 };
 
 export const observePayment = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
+  const route = payment.wallet_routes?.[payment.network];
+  if (route?.provider === "binance") {
+    return monitorBinance(payment);
+  }
+
   switch (payment.network) {
     case "ERC20":
       return monitorEthereum(payment);

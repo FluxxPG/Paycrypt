@@ -74,19 +74,6 @@ export const AdminMerchantsPanel = () => {
     }
   };
 
-  const toggleNonCustodial = async (merchantId: string, enabled: boolean) => {
-    setBusy(true);
-    try {
-      await apiFetch(`/admin/merchants/${merchantId}/non-custodial`, {
-        method: "POST",
-        body: JSON.stringify({ enabled })
-      });
-      await loadMerchants();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <Card>
@@ -156,13 +143,6 @@ export const AdminMerchantsPanel = () => {
                   <div className="flex flex-wrap gap-2">
                     <Button variant="secondary" onClick={() => setSelectedMerchantId(merchant.id)}>
                       Manage
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => toggleNonCustodial(merchant.id, !merchant.non_custodial_enabled)}
-                      disabled={busy}
-                    >
-                      {merchant.non_custodial_enabled ? "Revoke NC" : "Approve NC"}
                     </Button>
                     <Button
                       onClick={() =>

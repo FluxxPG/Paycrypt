@@ -37,6 +37,11 @@ type ReportsResponse = {
     payload: Record<string, unknown>;
     created_at: string;
   }>;
+  failedPayments: Array<{
+    id: string;
+    status: string;
+    created_at: string;
+  }>;
 };
 
 const formatDate = (value: string) =>
@@ -222,6 +227,27 @@ export const ReportsPanel = () => {
               </div>
             </div>
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-medium text-white">Failed payments</p>
+          <Badge>{data.failedPayments.length}</Badge>
+        </div>
+        <div className="mt-6 space-y-3 text-sm text-slate-300">
+          {data.failedPayments.map((entry) => (
+            <div key={entry.id} className="glass-soft rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-white">{entry.id}</p>
+                  <p className="mt-1 text-xs text-slate-500">{formatDate(entry.created_at)}</p>
+                </div>
+                <Badge className="capitalize">{entry.status}</Badge>
+              </div>
+            </div>
+          ))}
+          {data.failedPayments.length === 0 ? <p className="text-sm text-slate-400">No failures in this period.</p> : null}
         </div>
       </Card>
     </div>
