@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, FileText, Gauge, Server, ShieldCheck, Webhook } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FileText, Gauge, ShieldCheck, Webhook } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 import { apiFetch } from "../lib/authed-fetch";
 
 type Merchant = {
@@ -93,13 +91,6 @@ const formatTime = (value: string) =>
 export const AdminPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[] | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
-  const [selectedPlan, setSelectedPlan] = useState<"starter" | "business" | "premium" | "custom">("business");
-  const [customMonthlyPriceInr, setCustomMonthlyPriceInr] = useState("0");
-  const [customTransactionLimit, setCustomTransactionLimit] = useState("0");
-  const [customSetupFeeInr, setCustomSetupFeeInr] = useState("0");
-  const [busy, setBusy] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     Promise.all([apiFetch<{ data: Merchant[] }>("/admin/merchants"), apiFetch<Analytics>("/admin/analytics")]).then(
@@ -107,18 +98,12 @@ export const AdminPanel = () => {
         if (!mounted) return;
         setMerchants(merchantPayload.data);
         setAnalytics(analyticsPayload);
-        setSelectedMerchantId(merchantPayload.data[0]?.id ?? "");
       }
     );
     return () => {
       mounted = false;
     };
   }, []);
-
-  const selectedMerchant = useMemo(
-    () => merchants?.find((merchant) => merchant.id === selectedMerchantId) ?? null,
-    [merchants, selectedMerchantId]
-  );
 
   const queueBacklog = useMemo(() => {
     if (!analytics) return 0;
@@ -144,45 +129,6 @@ export const AdminPanel = () => {
       (analytics.monitoring.webhookSummary.delivered / analytics.monitoring.webhookSummary.total) * 100
     );
   }, [analytics]);
-
-  const toggleNonCustodialFor = async (merchantId: string, enabled: boolean) => {
-    setBusy(true);
-    try {
-      await apiFetch(`/admin/merchants/${merchantId}/non-custodial`, {
-        method: "POST",
-        body: JSON.stringify({ enabled })
-      });
-      const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
-      setMerchants(payload.data);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleNonCustodial = async () => {
-    if (!selectedMerchant) return;
-    await toggleNonCustodialFor(selectedMerchant.id, !selectedMerchant.non_custodial_enabled);
-  };
-
-  const updatePlan = async () => {
-    if (!selectedMerchant) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/admin/merchants/${selectedMerchant.id}/subscription`, {
-        method: "POST",
-        body: JSON.stringify({
-          planCode: selectedPlan,
-          monthlyPriceInr: selectedPlan === "custom" ? Number(customMonthlyPriceInr) : undefined,
-          transactionLimit: selectedPlan === "custom" ? Number(customTransactionLimit) : undefined,
-          setupFeeInr: selectedPlan === "custom" ? Number(customSetupFeeInr) : undefined
-        })
-      });
-      const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
-      setMerchants(payload.data);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (!merchants || !analytics) return <Card>Loading admin data...</Card>;
 
@@ -247,111 +193,7 @@ export const AdminPanel = () => {
         </Card>
       </div>
 
-      <Card id="controls">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-medium text-white">Live merchant controls</h2>
-            <p className="text-sm text-slate-400">
-              Change plan tier or toggle non-custodial access for a specific merchant.
-            </p>
-          </div>
-          <Badge>Super Admin</Badge>
-        </div>
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
-          <div>
-            <label className="mb-2 block text-sm text-slate-300">Merchant</label>
-            <select
-              value={selectedMerchantId}
-              onChange={(event) => setSelectedMerchantId(event.target.value)}
-              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
-            >
-              {merchants.map((merchant) => (
-                <option key={merchant.id} value={merchant.id} className="bg-slate-900">
-                  {merchant.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-2 block text-sm text-slate-300">Plan</label>
-            <select
-              value={selectedPlan}
-              onChange={(event) => setSelectedPlan(event.target.value as typeof selectedPlan)}
-              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
-            >
-              <option value="starter" className="bg-slate-900">
-                Starter
-              </option>
-              <option value="business" className="bg-slate-900">
-                Business
-              </option>
-              <option value="premium" className="bg-slate-900">
-                Premium
-              </option>
-              <option value="custom" className="bg-slate-900">
-                Custom
-              </option>
-            </select>
-          </div>
-          <div className="flex flex-col justify-end gap-3 sm:flex-row">
-            <Button variant="secondary" onClick={toggleNonCustodial} disabled={!selectedMerchant || busy}>
-              {selectedMerchant?.non_custodial_enabled ? "Disable NC" : "Enable NC"}
-            </Button>
-            <Button onClick={updatePlan} disabled={!selectedMerchant || busy}>
-              Update plan
-            </Button>
-          </div>
-        </div>
-        {selectedPlan === "custom" ? (
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <div>
-              <label className="mb-2 block text-sm text-slate-300">Monthly price INR</label>
-              <Input value={customMonthlyPriceInr} onChange={(e) => setCustomMonthlyPriceInr(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm text-slate-300">Transaction limit</label>
-              <Input value={customTransactionLimit} onChange={(e) => setCustomTransactionLimit(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm text-slate-300">Setup fee INR</label>
-              <Input value={customSetupFeeInr} onChange={(e) => setCustomSetupFeeInr(e.target.value)} />
-            </div>
-          </div>
-        ) : null}
-        {selectedMerchant ? (
-          <div className="mt-5 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
-            <div className="glass-soft rounded-2xl p-4">Selected: {selectedMerchant.name}</div>
-            <div className="glass-soft rounded-2xl p-4">Plan: {selectedMerchant.plan_code ?? "custom"}</div>
-            <div className="glass-soft rounded-2xl p-4">
-              Non-custodial: {selectedMerchant.non_custodial_enabled ? "enabled" : "disabled"}
-            </div>
-          </div>
-        ) : null}
-      </Card>
-
-      <div id="revenue" className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium text-white">Merchant access controls</h2>
-            <Badge>Super Admin</Badge>
-          </div>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            {merchants.slice(0, 4).map((merchant) => (
-              <div key={merchant.id} className="glass-soft rounded-2xl p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-white">{merchant.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {merchant.plan_code ?? "custom"} - {merchant.non_custodial_enabled ? "non-custodial enabled" : "custodial only"}
-                    </p>
-                  </div>
-                  <ShieldCheck className="h-4 w-4 text-cyan-300" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
+      <div id="revenue" className="grid gap-6">
         <Card>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium text-white">Revenue mix</h2>
@@ -374,47 +216,6 @@ export const AdminPanel = () => {
           </div>
         </Card>
       </div>
-
-      <Card id="merchants">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-medium text-white">Merchant directory</h2>
-            <p className="text-sm text-slate-400">Live status, plan, and wallet entitlements for every merchant.</p>
-          </div>
-          <Badge>{merchants.length} total</Badge>
-        </div>
-        <div className="mt-6 grid gap-3">
-          {merchants.map((merchant) => (
-            <div key={merchant.id} className="glass-soft rounded-2xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="text-white">{merchant.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">{merchant.email}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-                  <span className="glass-soft rounded-full px-3 py-1 capitalize">{merchant.plan_code ?? "custom"}</span>
-                  <span className="glass-soft rounded-full px-3 py-1">{merchant.status}</span>
-                  <span className="glass-soft rounded-full px-3 py-1">
-                    Custodial {merchant.custodial_enabled ? "on" : "off"}
-                  </span>
-                  <span className="glass-soft rounded-full px-3 py-1">
-                    Non-custodial {merchant.non_custodial_enabled ? "on" : "off"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => toggleNonCustodialFor(merchant.id, !merchant.non_custodial_enabled)}
-                    disabled={busy}
-                  >
-                    {merchant.non_custodial_enabled ? "Revoke NC" : "Approve NC"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
 
       <div id="operations" className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
         <Card>

@@ -29,6 +29,10 @@ export const AdminMerchantsPanel = () => {
     email: "",
     planCode: "starter"
   });
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: ""
+  });
 
   const selectedMerchant = useMemo(
     () => merchants.find((merchant) => merchant.id === selectedMerchantId) ?? null,
@@ -44,6 +48,14 @@ export const AdminMerchantsPanel = () => {
   useEffect(() => {
     void loadMerchants();
   }, []);
+
+  useEffect(() => {
+    if (!selectedMerchant) return;
+    setEditForm({
+      name: selectedMerchant.name,
+      email: selectedMerchant.email
+    });
+  }, [selectedMerchant]);
 
   const createMerchant = async () => {
     if (!form.name || !form.email) return;
@@ -68,6 +80,34 @@ export const AdminMerchantsPanel = () => {
         method: "PATCH",
         body: JSON.stringify({ status })
       });
+      await loadMerchants();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateMerchantDetails = async () => {
+    if (!selectedMerchant) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/admin/merchants/${selectedMerchant.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: editForm.name,
+          email: editForm.email
+        })
+      });
+      await loadMerchants();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disableMerchant = async () => {
+    if (!selectedMerchant) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/admin/merchants/${selectedMerchant.id}`, { method: "DELETE" });
       await loadMerchants();
     } finally {
       setBusy(false);
@@ -118,6 +158,58 @@ export const AdminMerchantsPanel = () => {
       </Card>
 
       <div className="grid gap-6">
+        <Card>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium text-white">Update merchant</h2>
+              <p className="text-sm text-slate-400">Edit merchant profile details or disable access.</p>
+            </div>
+            <Badge>{selectedMerchant?.name ?? "Select merchant"}</Badge>
+          </div>
+          <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_1.2fr_auto_auto]">
+            <select
+              value={selectedMerchantId}
+              onChange={(event) => setSelectedMerchantId(event.target.value)}
+              className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+            >
+              {merchants.map((merchant) => (
+                <option key={merchant.id} value={merchant.id} className="bg-slate-900">
+                  {merchant.name}
+                </option>
+              ))}
+            </select>
+            <div className="grid gap-3">
+              <Input
+                placeholder="Merchant name"
+                value={editForm.name}
+                onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
+              />
+              <Input
+                placeholder="Owner email"
+                value={editForm.email}
+                onChange={(event) => setEditForm((prev) => ({ ...prev, email: event.target.value }))}
+              />
+            </div>
+            <Button onClick={updateMerchantDetails} disabled={!selectedMerchant || busy}>
+              Save changes
+            </Button>
+            <Button variant="secondary" onClick={disableMerchant} disabled={!selectedMerchant || busy}>
+              Disable
+            </Button>
+          </div>
+          {selectedMerchant ? (
+            <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+              <div className="glass-soft rounded-2xl p-4">Status: {selectedMerchant.status}</div>
+              <div className="glass-soft rounded-2xl p-4">
+                Custodial: {selectedMerchant.custodial_enabled ? "enabled" : "disabled"}
+              </div>
+              <div className="glass-soft rounded-2xl p-4">
+                Non-custodial: {selectedMerchant.non_custodial_enabled ? "enabled" : "disabled"}
+              </div>
+            </div>
+          ) : null}
+        </Card>
+
         <Card>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium text-white">Merchant directory</h2>
