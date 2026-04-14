@@ -1,0 +1,16 @@
+import { Router } from "express";
+import { authRouter } from "./auth.js";
+import { dashboardRouter } from "./dashboard.js";
+import { publicRouter } from "./public.js";
+import { apiPlatformRouter } from "./platform.js";
+import { adminRouter } from "./admin.js";
+
+export const buildRouter = () => {
+  const router = Router();
+  router.use("/auth", authRouter);
+  router.use("/dashboard", dashboardRouter);
+  router.use("/v1", apiPlatformRouter);
+  router.use("/public", publicRouter);
+  router.use("/admin", adminRouter);
+  return router;
+};

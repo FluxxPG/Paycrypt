@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@cryptopay/shared/*": ["packages/shared/src/*"],
+      "@cryptopay/shared": ["packages/shared/src/index"],
+      "@cryptopay/sdk": ["packages/sdk/src/index"]
+    }
+  }
+}

@@ -1,0 +1,261 @@
+import { Router } from "express";
+import { requireJwt, redisRateLimit } from "../lib/middleware.js";
+import { createApiKeyPair } from "../lib/keys.js";
+import { hashValue } from "../lib/security.js";
+import { query } from "../lib/db.js";
+import {
+  createWebhookEndpoint,
+  fetchPayment,
+  getSubscriptionSummary,
+  listTransactions,
+  listSettlements,
+  listWallets,
+  revokeApiKey,
+  revokeWebhookEndpoint,
+  rotateApiSecretKey,
+  rotateWebhookEndpointSecret,
+  updateMerchantSubscription
+} from "../lib/services.js";
+
+export const dashboardRouter = Router();
+
+dashboardRouter.use(requireJwt, redisRateLimit("dashboard", 300, 60));
+
+dashboardRouter.get("/overview", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const [payments, transactions, subscription] = await Promise.all([
+    query<{ status: string; count: number; amount: string }>(
+      `select status, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as amount
+       from payments where merchant_id = $1 group by status`,
+      [merchantId]
+    ),
+    query<{ total: number; volume: string }>(
+      `select count(*)::int as total, coalesce(sum(amount_fiat), 0)::numeric as volume
+       from payments where merchant_id = $1 and created_at >= date_trunc('month', now())`,
+      [merchantId]
+    ),
+    getSubscriptionSummary(merchantId)
+  ]);
+
+  const responsePayload = {
+    metrics: {
+      monthlyTransactions: transactions.rows[0]?.total ?? 0,
+      monthlyVolume: transactions.rows[0]?.volume ?? 0,
+      paymentBreakdown: payments.rows
+    },
+    subscription
+  };
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.get("/payments/:id", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const payment = await fetchPayment(String(req.params.id), merchantId);
+  if (!payment) {
+    return res.status(404).json({ message: "Payment not found" });
+  }
+  res.json(payment);
+});
+
+dashboardRouter.get("/transactions", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  res.json({ data: await listTransactions(merchantId) });
+});
+
+dashboardRouter.get("/settlements", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  res.json({ data: await listSettlements(merchantId) });
+});
+
+dashboardRouter.get("/payments", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const result = await query(
+    `select id, merchant_id, amount_fiat, fiat_currency, settlement_currency, network, customer_email, customer_name, description, status, confirmations, tx_hash, wallet_address, created_at
+     from payments where merchant_id = $1 order by created_at desc limit 100`,
+    [merchantId]
+  );
+  res.json({ data: result.rows });
+});
+
+dashboardRouter.get("/subscriptions", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  res.json(await getSubscriptionSummary(merchantId));
+});
+
+dashboardRouter.get("/wallets", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  res.json({ data: await listWallets(merchantId) });
+});
+
+dashboardRouter.get("/reports", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const [dailyPayments, statusBreakdown, webhookSummary, webhookLogs, usageLogs, transactions, auditLogs] =
+    await Promise.all([
+      query<{ day: string; count: number; volume: string }>(
+        `select date_trunc('day', created_at)::date as day, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as volume
+         from payments
+         where merchant_id = $1 and created_at >= now() - interval '14 days'
+         group by 1
+         order by 1 asc`,
+        [merchantId]
+      ),
+      query<{ status: string; count: number; volume: string }>(
+        `select status, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as volume
+         from payments
+         where merchant_id = $1
+         group by 1
+         order by count desc`,
+        [merchantId]
+      ),
+      query<{ total: number; delivered: number; failed: number }>(
+        `select
+          count(*)::int as total,
+          count(*) filter (where response_status between 200 and 299)::int as delivered,
+          count(*) filter (where response_status is null or response_status not between 200 and 299)::int as failed
+         from webhook_logs
+         where merchant_id = $1 and created_at >= now() - interval '30 days'`,
+        [merchantId]
+      ),
+      query(
+        `select event_type, response_status, attempt, delivered_at, next_retry_at, created_at
+         from webhook_logs
+         where merchant_id = $1
+         order by created_at desc
+         limit 20`,
+        [merchantId]
+      ),
+      query(
+        `select event_type, sum(quantity)::int as total
+         from usage_logs
+         where merchant_id = $1 and created_at >= now() - interval '30 days'
+         group by 1
+         order by total desc`,
+        [merchantId]
+      ),
+      query(
+        `select payment_id, asset, network, amount_crypto, amount_fiat, tx_hash, confirmations, status, created_at
+         from transactions
+         where merchant_id = $1
+         order by created_at desc
+         limit 20`,
+        [merchantId]
+      ),
+      query(
+        `select actor_id, action, payload, created_at
+         from audit_logs
+         where merchant_id = $1
+         order by created_at desc
+         limit 20`,
+        [merchantId]
+      )
+    ]);
+
+  res.json({
+    dailyPayments: dailyPayments.rows,
+    statusBreakdown: statusBreakdown.rows,
+    webhookSummary: webhookSummary.rows[0] ?? { total: 0, delivered: 0, failed: 0 },
+    webhookLogs: webhookLogs.rows,
+    usageLogs: usageLogs.rows,
+    transactions: transactions.rows,
+    auditLogs: auditLogs.rows
+  });
+});
+
+dashboardRouter.get("/api-keys", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const result = await query(
+    `select id, name, key_type, key_prefix, scopes, rate_limit_per_minute, last_used_at, created_at, is_active
+     from api_keys where merchant_id = $1 order by created_at desc`,
+    [merchantId]
+  );
+  res.json({ data: result.rows });
+});
+
+dashboardRouter.post("/api-keys", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { name, scopes, rateLimitPerMinute } = req.body as {
+    name: string;
+    scopes: string[];
+    rateLimitPerMinute?: number;
+  };
+  const { publicKey, secretKey } = createApiKeyPair();
+  const secretHash = await hashValue(secretKey);
+  const publicHash = await hashValue(publicKey);
+  const keyRateLimit = rateLimitPerMinute ?? 120;
+
+  await query(
+    `insert into api_keys (merchant_id, name, key_type, key_prefix, key_hash, scopes, is_active, rate_limit_per_minute)
+     values
+     ($1,$2,'public',$3,$4,$5,true,$6),
+     ($1,$2,'secret',$7,$8,$5,true,$6)`,
+    [merchantId, name, publicKey.slice(0, 15), publicHash, scopes, keyRateLimit, secretKey.slice(0, 15), secretHash]
+  );
+
+  const responsePayload = { publicKey, secretKey, rateLimitPerMinute: keyRateLimit };
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/webhooks", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await createWebhookEndpoint(merchantId, req.body);
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.get("/webhooks", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const result = await query(
+    `select id, target_url, events, is_active, secret_version, last_rotated_at, created_at
+     from webhook_endpoints where merchant_id = $1 order by created_at desc`,
+    [merchantId]
+  );
+  res.json({ data: result.rows });
+});
+
+dashboardRouter.delete("/webhooks/:id", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const result = await revokeWebhookEndpoint(merchantId, req.params.id);
+  if (!result) {
+    return res.status(404).json({ message: "Webhook endpoint not found" });
+  }
+  res.json({ success: true });
+});
+
+dashboardRouter.post("/webhooks/:id/rotate", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await rotateWebhookEndpointSecret(merchantId, req.params.id);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.post("/api-keys/:id/rotate", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await rotateApiSecretKey(merchantId, req.params.id);
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.delete("/api-keys/:id", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  await revokeApiKey(merchantId, req.params.id);
+  res.json({ success: true });
+});
+
+dashboardRouter.post("/subscriptions/plan", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { planCode } = req.body as { planCode: "starter" | "business" | "premium" | "custom" };
+  if (planCode === "custom") {
+    res.status(403).json({
+      error: "custom_plan_requires_admin",
+      message: "Custom plans require an admin override"
+    });
+    return;
+  }
+  const responsePayload = await updateMerchantSubscription(merchantId, planCode, {
+    actorId: (req as any).actor.userId
+  });
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});

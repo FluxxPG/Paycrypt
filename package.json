@@ -1,0 +1,19 @@
+{
+  "name": "crypto-gateway-saas",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:ws": "npm --workspace apps/ws run dev",
+    "dev:worker": "npm --workspace apps/worker run dev",
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "build": "npm --workspace packages/shared run build && npm --workspace packages/sdk run build && npm --workspace apps/api run build && npm --workspace apps/ws run build && npm --workspace apps/worker run build && npm --workspace apps/web run build",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
