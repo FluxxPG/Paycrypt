@@ -22,6 +22,7 @@ const navSections = [
     items: [
       { href: "/dashboard", label: "Overview", icon: Activity },
       { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
+      { href: "/dashboard/transactions", label: "Transactions", icon: Banknote },
       { href: "/dashboard/settlements", label: "Settlements", icon: ReceiptText },
       { href: "/dashboard/wallets", label: "Wallets", icon: Wallet }
     ]

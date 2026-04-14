@@ -210,13 +210,13 @@ export const AdminWebhooksPanel = () => {
                   <p className="text-white">{log.event_type}</p>
                   <p className="mt-1 text-xs text-slate-500">{log.merchant_name}</p>
                 </div>
-                <div className="text-xs text-slate-400">
-                  Status {log.response_status ?? "n/a"} • Attempt {log.attempt}
-                </div>
+            <div className="text-xs text-slate-400">
+              Status {log.response_status ?? "n/a"} - Attempt {log.attempt}
+            </div>
               </div>
               <p className="mt-2 text-xs text-slate-500">
-                {new Date(log.created_at).toLocaleString()}{" "}
-                {log.next_retry_at ? `• Retry ${new Date(log.next_retry_at).toLocaleString()}` : ""}
+            {new Date(log.created_at).toLocaleString()}{" "}
+            {log.next_retry_at ? ` - Retry ${new Date(log.next_retry_at).toLocaleString()}` : ""}
               </p>
             </div>
           ))}

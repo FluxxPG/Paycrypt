@@ -175,10 +175,10 @@ export const AdminApiKeysPanel = () => {
             <div key={key.id} className="glass-soft rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-white">
-                    {key.name} • {key.key_type}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">{key.key_prefix}•••</p>
+              <p className="text-white">
+                {key.name} - {key.key_type}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">{key.key_prefix}...</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
                   <span className="glass-soft rounded-full px-3 py-1">{key.is_active ? "active" : "revoked"}</span>

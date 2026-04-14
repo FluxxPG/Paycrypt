@@ -155,15 +155,16 @@ export const AdminPanel = () => {
           <Badge>Super Admin</Badge>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: "Merchants", href: "/admin/merchants" },
-            { label: "Subscriptions", href: "/admin/subscriptions" },
-            { label: "Wallets", href: "/admin/wallets" },
-            { label: "API Keys", href: "/admin/api-keys" },
-            { label: "Webhooks", href: "/admin/webhooks" },
-            { label: "Revenue", href: "/admin/revenue" },
-            { label: "Risk & Alerts", href: "/admin/risk" }
-          ].map((item) => (
+            {[
+              { label: "Merchants", href: "/admin/merchants" },
+              { label: "Subscriptions", href: "/admin/subscriptions" },
+              { label: "Wallets", href: "/admin/wallets" },
+              { label: "Custody", href: "/admin/custody" },
+              { label: "API Keys", href: "/admin/api-keys" },
+              { label: "Webhooks", href: "/admin/webhooks" },
+              { label: "Revenue", href: "/admin/revenue" },
+              { label: "Risk & Alerts", href: "/admin/risk" }
+            ].map((item) => (
             <a
               key={item.label}
               href={item.href}

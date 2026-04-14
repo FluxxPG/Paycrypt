@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { AlertTriangle, Gauge, KeyRound, ShieldCheck, Users, Wallet, Webhook } from "lucide-react";
+import { AlertTriangle, Banknote, Gauge, KeyRound, ShieldCheck, Users, Wallet, Webhook } from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
 
@@ -12,6 +12,7 @@ const adminNav = [
   { href: "/admin/merchants", label: "Merchants", icon: Users },
   { href: "/admin/subscriptions", label: "Subscriptions", icon: Gauge },
   { href: "/admin/wallets", label: "Wallets", icon: Wallet },
+  { href: "/admin/custody", label: "Custody", icon: Banknote },
   { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
   { href: "/admin/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/admin/system", label: "System", icon: ShieldCheck },
