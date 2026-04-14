@@ -15,7 +15,13 @@ const schema = z.object({
   WEBHOOK_SIGNING_SECRET: z.string().min(16),
   ENCRYPTION_KEY: z.string().min(32),
   COOKIE_DOMAIN: z.string().default("localhost"),
-  PRICE_ORACLE_BASE_URL: z.string().url().optional()
+  PRICE_ORACLE_BASE_URL: z.string().url().optional(),
+  BINANCE_API_KEY: z.string().optional(),
+  BINANCE_API_SECRET: z.string().optional(),
+  BINANCE_BASE_URL: z.string().url().optional(),
+  TRONGRID_BASE_URL: z.string().url().optional(),
+  ETHEREUM_RPC_URL: z.string().url().optional(),
+  SOLANA_RPC_URL: z.string().url().optional()
 });
 
 export const env = schema.parse(process.env);

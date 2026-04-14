@@ -3,15 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { AlertTriangle, Gauge, ShieldCheck, Users } from "lucide-react";
+import { AlertTriangle, Gauge, KeyRound, ShieldCheck, Users, Wallet, Webhook } from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
 
 const adminNav = [
   { href: "/admin", label: "Control Room", icon: ShieldCheck },
-  { href: "/admin", label: "Merchants", icon: Users },
-  { href: "/admin", label: "Revenue", icon: Gauge },
-  { href: "/admin", label: "Risk & Alerts", icon: AlertTriangle }
+  { href: "/admin/merchants", label: "Merchants", icon: Users },
+  { href: "/admin/subscriptions", label: "Subscriptions", icon: Gauge },
+  { href: "/admin/wallets", label: "Wallets", icon: Wallet },
+  { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
+  { href: "/admin/webhooks", label: "Webhooks", icon: Webhook },
+  { href: "/admin/revenue", label: "Revenue", icon: Gauge },
+  { href: "/admin/risk", label: "Risk & Alerts", icon: AlertTriangle }
 ];
 
 const Brand = () => (

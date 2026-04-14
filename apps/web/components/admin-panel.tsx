@@ -145,19 +145,23 @@ export const AdminPanel = () => {
     );
   }, [analytics]);
 
-  const toggleNonCustodial = async () => {
-    if (!selectedMerchant) return;
+  const toggleNonCustodialFor = async (merchantId: string, enabled: boolean) => {
     setBusy(true);
     try {
-      await apiFetch(`/admin/merchants/${selectedMerchant.id}/non-custodial`, {
+      await apiFetch(`/admin/merchants/${merchantId}/non-custodial`, {
         method: "POST",
-        body: JSON.stringify({ enabled: !selectedMerchant.non_custodial_enabled })
+        body: JSON.stringify({ enabled })
       });
       const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
       setMerchants(payload.data);
     } finally {
       setBusy(false);
     }
+  };
+
+  const toggleNonCustodial = async () => {
+    if (!selectedMerchant) return;
+    await toggleNonCustodialFor(selectedMerchant.id, !selectedMerchant.non_custodial_enabled);
   };
 
   const updatePlan = async () => {
@@ -196,7 +200,35 @@ export const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-4">
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-white">Admin services</h2>
+            <p className="text-sm text-slate-400">Jump into any control surface from the command deck.</p>
+          </div>
+          <Badge>Super Admin</Badge>
+        </div>
+        <div className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "Merchants", href: "/admin/merchants" },
+            { label: "Subscriptions", href: "/admin/subscriptions" },
+            { label: "Wallets", href: "/admin/wallets" },
+            { label: "API Keys", href: "/admin/api-keys" },
+            { label: "Webhooks", href: "/admin/webhooks" },
+            { label: "Revenue", href: "/admin/revenue" },
+            { label: "Risk & Alerts", href: "/admin/risk" }
+          ].map((item) => (
+            <a
+              key={item.label}
+              href={item.href}
+              className="glass-soft rounded-2xl px-4 py-3 text-sm text-slate-200 transition hover:bg-white/10"
+            >
+              {item.label}
+            </a>
+          ))}
+        </div>
+      </Card>
+      <div id="overview" className="grid gap-6 lg:grid-cols-4">
         <Card>
           <p className="text-sm text-slate-400">Merchants</p>
           <p className="mt-4 text-3xl font-semibold text-white">{analytics.merchants}</p>
@@ -215,7 +247,7 @@ export const AdminPanel = () => {
         </Card>
       </div>
 
-      <Card>
+      <Card id="controls">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-medium text-white">Live merchant controls</h2>
@@ -297,7 +329,7 @@ export const AdminPanel = () => {
         ) : null}
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+      <div id="revenue" className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium text-white">Merchant access controls</h2>
@@ -343,7 +375,48 @@ export const AdminPanel = () => {
         </Card>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+      <Card id="merchants">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-white">Merchant directory</h2>
+            <p className="text-sm text-slate-400">Live status, plan, and wallet entitlements for every merchant.</p>
+          </div>
+          <Badge>{merchants.length} total</Badge>
+        </div>
+        <div className="mt-6 grid gap-3">
+          {merchants.map((merchant) => (
+            <div key={merchant.id} className="glass-soft rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-white">{merchant.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{merchant.email}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                  <span className="glass-soft rounded-full px-3 py-1 capitalize">{merchant.plan_code ?? "custom"}</span>
+                  <span className="glass-soft rounded-full px-3 py-1">{merchant.status}</span>
+                  <span className="glass-soft rounded-full px-3 py-1">
+                    Custodial {merchant.custodial_enabled ? "on" : "off"}
+                  </span>
+                  <span className="glass-soft rounded-full px-3 py-1">
+                    Non-custodial {merchant.non_custodial_enabled ? "on" : "off"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => toggleNonCustodialFor(merchant.id, !merchant.non_custodial_enabled)}
+                    disabled={busy}
+                  >
+                    {merchant.non_custodial_enabled ? "Revoke NC" : "Approve NC"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div id="operations" className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
         <Card>
           <div className="flex items-center justify-between">
             <div>
@@ -434,7 +507,7 @@ export const AdminPanel = () => {
         </Card>
       </div>
 
-      <Card>
+      <Card id="telemetry">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-medium text-white">Platform telemetry</h2>
@@ -498,7 +571,7 @@ export const AdminPanel = () => {
         </div>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <div id="audit" className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <Card>
           <div className="flex items-center justify-between">
             <div>

@@ -7,7 +7,9 @@ import {
   supportedNetworks,
   planCatalog
 } from "@cryptopay/shared";
-import { createPaymentLinkReference, createPaymentReference, createWalletAddress } from "./keys.js";
+import { createApiKeyPair, createPaymentLinkReference, createPaymentReference } from "./keys.js";
+import { getBinanceDepositAddress } from "./binance.js";
+import { nanoid } from "nanoid";
 import { query, withTransaction } from "./db.js";
 import { emitPaymentEvent } from "./realtime.js";
 import { decryptSecret, encryptSecret, hmacSignWithSecret, hashValue } from "./security.js";
@@ -25,6 +27,29 @@ import { recordPaymentStatus } from "./telemetry.js";
 export const persistResponse = <T>(payload: T) => payload;
 export { listBillingInvoices };
 
+const getSelectedNonCustodialWallet = async (
+  merchantId: string,
+  asset: string,
+  network: string
+) => {
+  const result = await query<{
+    address: string;
+    provider: string;
+  }>(
+    `select address, provider
+     from wallets
+     where merchant_id = $1
+       and wallet_type = 'non_custodial'
+       and asset = $2
+       and network = $3
+       and is_active = true
+     order by is_selected desc, created_at desc
+     limit 1`,
+    [merchantId, asset, network]
+  );
+  return result.rows[0] ?? null;
+};
+
 export const createPaymentIntent = async (merchantId: string, input: unknown) => {
   const parsed = createPaymentSchema.parse(input);
   await assertMerchantCanAcceptPayment(merchantId, parsed.settlementCurrency, parsed.network);
@@ -40,20 +65,53 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
     throw new Error(`Network ${parsed.network} is not supported for ${parsed.settlementCurrency}`);
   }
 
-  const walletRoutes = Object.fromEntries(
-    supportedRouteNetworks.map((network) => [
-      network,
-      {
+  const walletRoutes: Record<
+    string,
+    {
+      asset: string;
+      network: string;
+      address: string;
+      provider: string;
+      walletType: "custodial" | "non_custodial";
+      amountCrypto: number;
+      exchangeRate: number;
+    }
+  > = {};
+
+  for (const network of supportedRouteNetworks) {
+    if (network === "BTC") {
+      const deposit = await getBinanceDepositAddress(parsed.settlementCurrency, network);
+      walletRoutes[network] = {
         asset: parsed.settlementCurrency,
         network,
-        address: createWalletAddress(network),
-        provider: network === "BTC" ? "binance" : network === "ERC20" ? "ethereum" : network === "TRC20" ? "tron" : "solana",
-        walletType: network === "BTC" ? "custodial" : "non_custodial",
+        address: deposit.address,
+        provider: "binance",
+        walletType: "custodial",
         amountCrypto: quote.amountCrypto,
         exchangeRate: quote.exchangeRate
-      }
-    ])
-  );
+      };
+      continue;
+    }
+
+    const wallet = await getSelectedNonCustodialWallet(merchantId, parsed.settlementCurrency, network);
+    if (!wallet) {
+      throw new AppError(
+        412,
+        "wallet_not_configured",
+        `Non-custodial wallet not configured for ${parsed.settlementCurrency} on ${network}`
+      );
+    }
+
+    walletRoutes[network] = {
+      asset: parsed.settlementCurrency,
+      network,
+      address: wallet.address,
+      provider: wallet.provider ?? "merchant",
+      walletType: "non_custodial",
+      amountCrypto: quote.amountCrypto,
+      exchangeRate: quote.exchangeRate
+    };
+  }
   const walletAddress = walletRoutes[parsed.network].address;
   const expiresAt = new Date(Date.now() + parsed.expiresInMinutes * 60 * 1000);
 
@@ -401,6 +459,37 @@ export const listWallets = async (merchantId: string) =>
     [merchantId]
   ).then((res) => res.rows);
 
+export const registerNonCustodialWallet = async (
+  merchantId: string,
+  input: {
+    asset: string;
+    network: string;
+    address: string;
+    provider?: string;
+  }
+) => {
+  const result = await query(
+    `insert into wallets (
+      merchant_id,
+      wallet_type,
+      provider,
+      asset,
+      network,
+      address,
+      is_active,
+      is_selected,
+      last_seen_at
+    ) values ($1,'non_custodial',$2,$3,$4,$5,true,false,null)
+    on conflict do nothing
+    returning id`,
+    [merchantId, input.provider ?? "merchant", input.asset, input.network, input.address]
+  );
+  if (!result.rows[0]) {
+    throw new AppError(409, "wallet_exists", "Wallet address already registered");
+  }
+  return result.rows[0];
+};
+
 export const getSubscriptionSummary = async (merchantId: string) => {
   const subscriptionResult = await query<{
     id: string;
@@ -488,6 +577,329 @@ export const listMerchantsForAdmin = async () =>
      ) s on true
      order by m.created_at desc`
   ).then((res) => res.rows);
+
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+export const createMerchantForAdmin = async (input: {
+  name: string;
+  email: string;
+  slug?: string;
+  ownerName?: string;
+  planCode?: keyof typeof planCatalog;
+  actorId: string;
+}) => {
+  const merchantId = `mrc_${nanoid(10)}`;
+  const userId = `usr_${nanoid(10)}`;
+  const tempPassword = `Temp${nanoid(8)}!`;
+  const passwordHash = await hashValue(tempPassword);
+  const slug = (input.slug ? slugify(input.slug) : slugify(input.name)) || `merchant-${nanoid(6)}`;
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `insert into merchants (id, name, slug, email, status, custodial_enabled, non_custodial_enabled)
+       values ($1,$2,$3,$4,'active',true,false)`,
+      [merchantId, input.name, slug, input.email]
+    );
+    await client.query(
+      `insert into users (id, merchant_id, full_name, email, password_hash, role)
+       values ($1,$2,$3,$4,$5,'merchant')`,
+      [userId, merchantId, input.ownerName ?? input.name, input.email, passwordHash]
+    );
+    await client.query(
+      `insert into audit_logs (actor_id, merchant_id, action, payload)
+       values ($1,$2,'merchant.created',$3::jsonb)`,
+      [input.actorId, merchantId, JSON.stringify({ name: input.name, email: input.email, slug })]
+    );
+  });
+
+  if (input.planCode) {
+    await changeSubscriptionPlan(merchantId, input.planCode, { actorId: input.actorId });
+  }
+
+  const merchant = await query("select * from merchants where id = $1", [merchantId]).then((res) => res.rows[0]);
+  return { merchant, tempPassword };
+};
+
+export const updateMerchantForAdmin = async (
+  merchantId: string,
+  input: {
+    name?: string;
+    email?: string;
+    status?: string;
+    webhookBaseUrl?: string | null;
+    custodialEnabled?: boolean;
+  },
+  actorId: string
+) => {
+  const result = await query(
+    `update merchants
+     set
+       name = coalesce($2, name),
+       email = coalesce($3, email),
+       status = coalesce($4, status),
+       webhook_base_url = coalesce($5, webhook_base_url),
+       custodial_enabled = coalesce($6, custodial_enabled),
+       updated_at = now()
+     where id = $1
+     returning *`,
+    [merchantId, input.name ?? null, input.email ?? null, input.status ?? null, input.webhookBaseUrl ?? null, input.custodialEnabled ?? null]
+  );
+
+  if (!result.rows[0]) {
+    throw new AppError(404, "merchant_not_found", "Merchant not found");
+  }
+
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'merchant.updated',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify(input)]
+  );
+  return result.rows[0];
+};
+
+export const disableMerchantForAdmin = async (merchantId: string, actorId: string) => {
+  const result = await query(
+    `update merchants
+     set status = 'disabled', updated_at = now()
+     where id = $1
+     returning *`,
+    [merchantId]
+  );
+  if (!result.rows[0]) {
+    throw new AppError(404, "merchant_not_found", "Merchant not found");
+  }
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'merchant.disabled',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ status: "disabled" })]
+  );
+  return result.rows[0];
+};
+
+export const getMerchantByIdForAdmin = async (merchantId: string) =>
+  query("select * from merchants where id = $1", [merchantId]).then((res) => res.rows[0] ?? null);
+
+export const listWalletsForAdmin = async (merchantId: string) => listWallets(merchantId);
+
+export const updateWalletForAdmin = async (
+  walletId: string,
+  input: { isActive?: boolean; isSelected?: boolean },
+  actorId: string
+) => {
+  return withTransaction(async (client) => {
+    const walletResult = await client.query<{
+      id: string;
+      merchant_id: string;
+      asset: string;
+      network: string;
+    }>(
+      `select id, merchant_id, asset, network from wallets where id = $1 limit 1`,
+      [walletId]
+    );
+    const wallet = walletResult.rows[0];
+    if (!wallet) {
+      throw new AppError(404, "wallet_not_found", "Wallet not found");
+    }
+
+    if (input.isSelected) {
+      await client.query(
+        `update wallets
+         set is_selected = false
+         where merchant_id = $1 and asset = $2 and network = $3`,
+        [wallet.merchant_id, wallet.asset, wallet.network]
+      );
+    }
+
+    const result = await client.query(
+      `update wallets
+       set is_active = coalesce($2, is_active),
+           is_selected = coalesce($3, is_selected)
+       where id = $1
+       returning *`,
+      [walletId, input.isActive ?? null, input.isSelected ?? null]
+    );
+
+    await client.query(
+      `insert into audit_logs (actor_id, merchant_id, action, payload)
+       values ($1,$2,'wallet.updated',$3::jsonb)`,
+      [actorId, wallet.merchant_id, JSON.stringify({ walletId, ...input })]
+    );
+
+    return result.rows[0];
+  });
+};
+
+export const listSubscriptionsForAdmin = async () =>
+  query(
+    `select s.*, m.name as merchant_name, m.email as merchant_email
+     from subscriptions s
+     join merchants m on m.id = s.merchant_id
+     order by s.updated_at desc`
+  ).then((res) => res.rows);
+
+export const listInvoicesForAdmin = async () =>
+  query(
+    `select i.*, m.name as merchant_name
+     from billing_invoices i
+     join merchants m on m.id = i.merchant_id
+     order by i.created_at desc
+     limit 50`
+  ).then((res) => res.rows);
+
+export const listApiKeysForAdmin = async (merchantId?: string) =>
+  query(
+    `select
+        k.id,
+        k.name,
+        k.key_type,
+        k.key_prefix,
+        k.scopes,
+        k.rate_limit_per_minute,
+        k.last_used_at,
+        k.created_at,
+        k.is_active,
+        m.id as merchant_id,
+        m.name as merchant_name,
+        m.email as merchant_email
+     from api_keys k
+     join merchants m on m.id = k.merchant_id
+     ${merchantId ? "where k.merchant_id = $1" : ""}
+     order by k.created_at desc`,
+    merchantId ? [merchantId] : []
+  ).then((res) => res.rows);
+
+export const createApiKeysForAdmin = async (input: {
+  merchantId: string;
+  name: string;
+  scopes: string[];
+  rateLimitPerMinute?: number;
+  actorId: string;
+}) => {
+  const { publicKey, secretKey } = createApiKeyPair();
+  const secretHash = await hashValue(secretKey);
+  const publicHash = await hashValue(publicKey);
+  const keyRateLimit = input.rateLimitPerMinute ?? 120;
+
+  await query(
+    `insert into api_keys (merchant_id, name, key_type, key_prefix, key_hash, scopes, is_active, rate_limit_per_minute)
+     values
+     ($1,$2,'public',$3,$4,$5,true,$6),
+     ($1,$2,'secret',$7,$8,$5,true,$6)`,
+    [
+      input.merchantId,
+      input.name,
+      publicKey.slice(0, 15),
+      publicHash,
+      input.scopes,
+      keyRateLimit,
+      secretKey.slice(0, 15),
+      secretHash
+    ]
+  );
+
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'api_keys.created',$3::jsonb)`,
+    [input.actorId, input.merchantId, JSON.stringify({ name: input.name, scopes: input.scopes })]
+  );
+
+  return { publicKey, secretKey, rateLimitPerMinute: keyRateLimit };
+};
+
+export const rotateApiKeyForAdmin = async (merchantId: string, keyId: string, actorId: string) => {
+  const result = await rotateApiSecretKey(merchantId, keyId);
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'api_keys.rotated',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ keyId })]
+  );
+  return result;
+};
+
+export const revokeApiKeyForAdmin = async (merchantId: string, keyId: string, actorId: string) => {
+  const result = await revokeApiKey(merchantId, keyId);
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'api_keys.revoked',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ keyId })]
+  );
+  return result;
+};
+
+export const listWebhookEndpointsForAdmin = async (merchantId?: string) =>
+  query(
+    `select
+        w.id,
+        w.target_url,
+        w.events,
+        w.is_active,
+        w.secret_version,
+        w.last_rotated_at,
+        w.created_at,
+        m.id as merchant_id,
+        m.name as merchant_name,
+        m.email as merchant_email
+     from webhook_endpoints w
+     join merchants m on m.id = w.merchant_id
+     ${merchantId ? "where w.merchant_id = $1" : ""}
+     order by w.created_at desc`,
+    merchantId ? [merchantId] : []
+  ).then((res) => res.rows);
+
+export const toggleWebhookEndpointForAdmin = async (
+  merchantId: string,
+  endpointId: string,
+  isActive: boolean,
+  actorId: string
+) => {
+  const result = await query(
+    `update webhook_endpoints
+     set is_active = $3
+     where id = $1 and merchant_id = $2
+     returning id, is_active`,
+    [endpointId, merchantId, isActive]
+  );
+  if (!result.rows[0]) {
+    throw new AppError(404, "webhook_endpoint_not_found", "Webhook endpoint not found");
+  }
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'webhook.updated',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ endpointId, isActive })]
+  );
+  return result.rows[0];
+};
+
+export const rotateWebhookEndpointForAdmin = async (
+  merchantId: string,
+  endpointId: string,
+  actorId: string
+) => {
+  const result = await rotateWebhookEndpointSecret(merchantId, endpointId);
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'webhook.rotated',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ endpointId })]
+  );
+  return result;
+};
+
+export const revokeWebhookEndpointForAdmin = async (merchantId: string, endpointId: string, actorId: string) => {
+  const result = await revokeWebhookEndpoint(merchantId, endpointId);
+  if (!result) {
+    throw new AppError(404, "webhook_endpoint_not_found", "Webhook endpoint not found");
+  }
+  await query(
+    `insert into audit_logs (actor_id, merchant_id, action, payload)
+     values ($1,$2,'webhook.revoked',$3::jsonb)`,
+    [actorId, merchantId, JSON.stringify({ endpointId })]
+  );
+  return result;
+};
 
 export const updateMerchantWalletAccess = async (
   merchantId: string,
