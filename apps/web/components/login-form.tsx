@@ -9,7 +9,7 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { getApiBaseUrl } from "../lib/runtime-config";
 import { clearAccessToken, setAccessToken } from "../lib/session";
-import { defaultConsoleForRole, isAdminRole, type AppRole } from "../lib/roles";
+import { defaultConsoleForRole, defaultPasswordSetupPathForRole, isAdminRole, type AppRole } from "../lib/roles";
 
 type LoginFormProps = {
   variant?: "merchant" | "admin";
@@ -18,10 +18,6 @@ type LoginFormProps = {
 
 export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginFormProps) => {
   const router = useRouter();
-  const defaults =
-    variant === "admin"
-      ? { email: "admin@cryptopay.dev", password: "AdminChangeMe123!" }
-      : { email: "owner@nebula.dev", password: "ChangeMe123!" };
   const copy =
     variant === "admin"
       ? {
@@ -46,8 +42,8 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
             { icon: Clock3, label: "Session timeout: 30 min" }
           ]
         };
-  const [email, setEmail] = useState(defaults.email);
-  const [password, setPassword] = useState(defaults.password);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -76,6 +72,7 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
       }
 
       const role = data.user?.role as AppRole | undefined;
+      const requiresPasswordSetup = Boolean(data.user?.requiresPasswordSetup);
       const matchesConsole = variant === "admin" ? isAdminRole(role) : role === "merchant";
 
       if (!matchesConsole) {
@@ -92,7 +89,9 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
       }
 
       setAccessToken(data.accessToken);
-      const redirect = onSuccessRedirect ?? defaultConsoleForRole(role);
+      const redirect = requiresPasswordSetup
+        ? defaultPasswordSetupPathForRole(role)
+        : onSuccessRedirect ?? defaultConsoleForRole(role);
       router.push(redirect);
       router.refresh();
     } catch (err) {
@@ -115,9 +114,9 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
         </div>
         <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white">{copy.title}</h2>
         <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300">{copy.description}</p>
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-400/15 bg-emerald-400/8 px-3 py-1.5 text-xs text-emerald-200">
+        <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-cyan-400/15 bg-cyan-400/8 px-3 py-1.5 text-xs text-cyan-200">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          Demo credentials are prefilled for this environment.
+          First-time merchant accounts are routed through password setup before dashboard access.
         </div>
       </div>
 

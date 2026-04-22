@@ -1,0 +1,107 @@
+{
+  "CallerReference": "paycrypt-20260422-082500",
+  "Comment": "paycrypt-api-edge",
+  "Enabled": true,
+  "PriceClass": "PriceClass_100",
+  "Origins": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Id": "paycrypt-api-origin",
+        "DomainName": "ec2-65-2-34-31.ap-south-1.compute.amazonaws.com",
+        "CustomOriginConfig": {
+          "HTTPPort": 4000,
+          "HTTPSPort": 4000,
+          "OriginProtocolPolicy": "http-only",
+          "OriginSslProtocols": {
+            "Quantity": 1,
+            "Items": ["TLSv1.2"]
+          },
+          "OriginReadTimeout": 30,
+          "OriginKeepaliveTimeout": 5
+        }
+      },
+      {
+        "Id": "paycrypt-ws-origin",
+        "DomainName": "ec2-65-2-34-31.ap-south-1.compute.amazonaws.com",
+        "CustomOriginConfig": {
+          "HTTPPort": 4001,
+          "HTTPSPort": 4001,
+          "OriginProtocolPolicy": "http-only",
+          "OriginSslProtocols": {
+            "Quantity": 1,
+            "Items": ["TLSv1.2"]
+          },
+          "OriginReadTimeout": 30,
+          "OriginKeepaliveTimeout": 5
+        }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "paycrypt-api-origin",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 7,
+      "Items": ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"],
+      "CachedMethods": {
+        "Quantity": 3,
+        "Items": ["GET", "HEAD", "OPTIONS"]
+      }
+    },
+    "Compress": true,
+    "MinTTL": 0,
+    "DefaultTTL": 0,
+    "MaxTTL": 0,
+    "ForwardedValues": {
+      "QueryString": true,
+      "Cookies": { "Forward": "all" },
+      "Headers": {
+        "Quantity": 6,
+        "Items": ["Authorization", "Content-Type", "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method", "X-Requested-With"]
+      }
+    }
+  },
+  "CacheBehaviors": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "PathPattern": "/socket.io/*",
+        "TargetOriginId": "paycrypt-ws-origin",
+        "ViewerProtocolPolicy": "https-only",
+        "AllowedMethods": {
+          "Quantity": 7,
+          "Items": ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"],
+          "CachedMethods": {
+            "Quantity": 3,
+            "Items": ["GET", "HEAD", "OPTIONS"]
+          }
+        },
+        "Compress": true,
+        "MinTTL": 0,
+        "DefaultTTL": 0,
+        "MaxTTL": 0,
+        "ForwardedValues": {
+          "QueryString": true,
+          "Cookies": { "Forward": "all" },
+          "Headers": {
+            "Quantity": 6,
+            "Items": ["Authorization", "Content-Type", "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method", "X-Requested-With"]
+          }
+        }
+      }
+    ]
+  },
+  "Restrictions": {
+    "GeoRestriction": {
+      "RestrictionType": "none",
+      "Quantity": 0
+    }
+  },
+  "ViewerCertificate": {
+    "CloudFrontDefaultCertificate": true,
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  },
+  "HttpVersion": "http2",
+  "IsIPV6Enabled": true
+}

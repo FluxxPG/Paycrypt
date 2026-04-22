@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../lib/authed-fetch";
 import type { ReactNode } from "react";
-import { defaultConsoleForRole, isAdminRole, loginPathForConsole, type AppRole } from "../lib/roles";
+import {
+  defaultConsoleForRole,
+  defaultPasswordSetupPathForRole,
+  isAdminRole,
+  loginPathForConsole,
+  type AppRole
+} from "../lib/roles";
 
 type AuthGateProps = {
   children: ReactNode;
@@ -17,13 +23,18 @@ export const AuthGate = ({ children, consoleType = "merchant" }: AuthGateProps) 
 
   useEffect(() => {
     let mounted = true;
-    apiFetch<{ user?: { role?: AppRole } }>("/auth/me")
+    apiFetch<{ user?: { role?: AppRole; requiresPasswordSetup?: boolean } }>("/auth/me")
       .then((payload) => {
         const role = payload.user?.role;
+        const requiresPasswordSetup = Boolean(payload.user?.requiresPasswordSetup);
         const allowed = consoleType === "admin" ? isAdminRole(role) : role === "merchant";
 
         if (!allowed) {
           router.replace(defaultConsoleForRole(role));
+          return;
+        }
+        if (requiresPasswordSetup) {
+          router.replace(defaultPasswordSetupPathForRole(role));
           return;
         }
         if (mounted) setReady(true);

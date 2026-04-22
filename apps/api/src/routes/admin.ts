@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { query } from "../lib/db.js";
 import { queues } from "../lib/queue.js";
-import { requireAdmin, requireJwt } from "../lib/middleware.js";
+import { requireAdmin, requireJwt, requirePasswordSetupComplete } from "../lib/middleware.js";
 import { readQueueLatency, readTelemetrySnapshot } from "../lib/telemetry.js";
 import { getBinanceBalances, getBinanceDepositHistory } from "../lib/binance.js";
 import { redis } from "../lib/redis.js";
 import {
   createMerchantForAdmin,
-  disableMerchantForAdmin,
+  deleteMerchantForAdmin,
   getMerchantByIdForAdmin,
   listApiKeysForAdmin,
   listInvoicesForAdmin,
@@ -36,7 +36,7 @@ import {
 
 export const adminRouter = Router();
 
-adminRouter.use(requireJwt, requireAdmin());
+adminRouter.use(requireJwt, requirePasswordSetupComplete, requireAdmin());
 
 adminRouter.get("/merchants", async (_req, res) => {
   res.json({ data: await listMerchantsForAdmin() });
@@ -88,7 +88,7 @@ adminRouter.patch("/merchants/:id", requireAdmin(true), async (req, res) => {
 });
 
 adminRouter.delete("/merchants/:id", requireAdmin(true), async (req, res) => {
-  const responsePayload = await disableMerchantForAdmin(String(req.params.id), (req as any).actor.userId);
+  const responsePayload = await deleteMerchantForAdmin(String(req.params.id), (req as any).actor.userId);
   res.locals.responsePayload = responsePayload;
   res.json({ data: responsePayload });
 });

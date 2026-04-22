@@ -11,6 +11,7 @@ export interface AuthenticatedRequest extends Request {
     userId: string;
     merchantId: string;
     role: "merchant" | "admin" | "super_admin";
+    requiresPasswordSetup: boolean;
   };
   apiKey?: {
     keyId: string;
@@ -29,10 +30,15 @@ export const requireJwt = async (req: AuthenticatedRequest, res: Response, next:
   try {
     const token = header.replace("Bearer ", "");
     const payload = verifyAccessToken(token);
+    const userResult = await query<{ must_change_password: boolean }>(
+      "select must_change_password from users where id = $1 limit 1",
+      [payload.sub]
+    );
     req.actor = {
       userId: payload.sub,
       merchantId: payload.merchantId,
-      role: payload.role
+      role: payload.role,
+      requiresPasswordSetup: Boolean(userResult.rows[0]?.must_change_password)
     };
     void recordAuthResult("jwt", true).catch((error) => console.error("Failed to record JWT auth telemetry", error));
     next();
@@ -102,6 +108,22 @@ export const requireApiKey = async (req: AuthenticatedRequest, res: Response, ne
       );
     }
   });
+  next();
+};
+
+export const requirePasswordSetupComplete = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (req.actor?.requiresPasswordSetup) {
+    return sendError(
+      res,
+      403,
+      "password_setup_required",
+      "Password setup is required before accessing this area"
+    );
+  }
   next();
 };
 

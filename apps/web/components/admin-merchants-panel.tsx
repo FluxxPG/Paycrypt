@@ -124,6 +124,7 @@ export const AdminMerchantsPanel = () => {
     try {
       await apiFetch(`/admin/merchants/${selectedMerchant.id}`, { method: "DELETE" });
       await loadMerchants();
+      setSelectedMerchantId("");
     } finally {
       setBusy(false);
     }
@@ -209,7 +210,7 @@ export const AdminMerchantsPanel = () => {
               Save changes
             </Button>
             <Button variant="secondary" onClick={disableMerchant} disabled={!selectedMerchant || busy}>
-              Disable
+              Delete merchant
             </Button>
           </div>
           {selectedMerchant ? (

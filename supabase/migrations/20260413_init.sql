@@ -27,6 +27,8 @@ create table if not exists users (
   email text not null unique,
   password_hash text not null,
   role text not null check (role in ('merchant', 'admin', 'super_admin')),
+  must_change_password boolean not null default false,
+  password_setup_completed_at timestamptz,
   created_at timestamptz not null default now()
 );
 

@@ -9,7 +9,7 @@ export default function AdminLoginPage() {
           <p className="text-sm uppercase tracking-[0.3em] text-violet-300">CryptoPay Cloud</p>
           <h1 className="mt-4 text-5xl font-semibold tracking-tight text-white">Sign in to the admin command deck.</h1>
           <p className="mt-4 max-w-xl text-slate-300">
-            Use the seeded super admin account to manage merchants, subscriptions, and custodial approvals.
+            Sign in with an admin account to manage merchants, subscriptions, custody approvals, and platform controls.
           </p>
           <div className="mt-8 flex flex-wrap gap-4 text-sm text-violet-200">
             <Link href="/">Back to home</Link>

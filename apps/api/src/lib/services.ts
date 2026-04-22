@@ -1275,8 +1275,15 @@ export const createMerchantForAdmin = async (input: {
       [merchantId, input.name, slug, input.email]
     );
     await client.query(
-      `insert into users (id, merchant_id, full_name, email, password_hash, role)
-       values ($1,$2,$3,$4,$5,'merchant')`,
+      `insert into users (
+        id,
+        merchant_id,
+        full_name,
+        email,
+        password_hash,
+        role,
+        must_change_password
+      ) values ($1,$2,$3,$4,$5,'merchant',true)`,
       [userId, merchantId, input.ownerName ?? input.name, input.email, passwordHash]
     );
     await client.query(
@@ -1331,23 +1338,25 @@ export const updateMerchantForAdmin = async (
   return result.rows[0];
 };
 
-export const disableMerchantForAdmin = async (merchantId: string, actorId: string) => {
-  const result = await query(
-    `update merchants
-     set status = 'disabled', updated_at = now()
-     where id = $1
-     returning *`,
-    [merchantId]
-  );
-  if (!result.rows[0]) {
-    throw new AppError(404, "merchant_not_found", "Merchant not found");
-  }
-  await query(
-    `insert into audit_logs (actor_id, merchant_id, action, payload)
-     values ($1,$2,'merchant.disabled',$3::jsonb)`,
-    [actorId, merchantId, JSON.stringify({ status: "disabled" })]
-  );
-  return result.rows[0];
+export const deleteMerchantForAdmin = async (merchantId: string, actorId: string) => {
+  return withTransaction(async (client) => {
+    const merchantResult = await client.query<{ id: string; name: string; email: string; slug: string }>(
+      `select id, name, email, slug from merchants where id = $1 limit 1`,
+      [merchantId]
+    );
+    const merchant = merchantResult.rows[0];
+    if (!merchant) {
+      throw new AppError(404, "merchant_not_found", "Merchant not found");
+    }
+
+    await client.query(
+      `insert into audit_logs (actor_id, merchant_id, action, payload)
+       values ($1, null, 'merchant.deleted', $2::jsonb)`,
+      [actorId, JSON.stringify(merchant)]
+    );
+    await client.query(`delete from merchants where id = $1`, [merchantId]);
+    return { deleted: true, merchantId, merchant };
+  });
 };
 
 export const getMerchantByIdForAdmin = async (merchantId: string) =>

@@ -8,5 +8,8 @@ export const isAdminRole = (role: AppRole | undefined | null) =>
 export const defaultConsoleForRole = (role: AppRole | undefined | null) =>
   isAdminRole(role) ? "/admin" : "/dashboard";
 
+export const defaultPasswordSetupPathForRole = (role: AppRole | undefined | null) =>
+  isAdminRole(role) ? "/admin/setup-password" : "/setup-password";
+
 export const loginPathForConsole = (consoleType: "merchant" | "admin") =>
   consoleType === "admin" ? "/admin/login" : "/login";

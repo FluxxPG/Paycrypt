@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireJwt, redisRateLimit } from "../lib/middleware.js";
+import { requireJwt, redisRateLimit, requirePasswordSetupComplete } from "../lib/middleware.js";
 import { createApiKeyPair } from "../lib/keys.js";
 import { hashValue } from "../lib/security.js";
 import { query } from "../lib/db.js";
@@ -39,7 +39,7 @@ const custodialProvisioningMatrix: Record<string, string[]> = {
   USDT: ["TRC20", "ERC20", "SOL"]
 };
 
-dashboardRouter.use(requireJwt, redisRateLimit("dashboard", 300, 60));
+dashboardRouter.use(requireJwt, requirePasswordSetupComplete, redisRateLimit("dashboard", 300, 60));
 
 dashboardRouter.get("/overview", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;

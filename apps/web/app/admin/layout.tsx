@@ -7,7 +7,7 @@ import { AuthGate } from "../../components/auth-gate";
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  if (pathname === "/admin/login") {
+  if (pathname === "/admin/login" || pathname === "/admin/setup-password") {
     return <>{children}</>;
   }
 

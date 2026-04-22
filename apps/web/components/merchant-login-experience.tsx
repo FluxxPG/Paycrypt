@@ -8,9 +8,9 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 
 const metrics = [
-  { label: "Merchants onboarded", value: "280+" },
-  { label: "Realtime event latency", value: "120ms" },
-  { label: "Active payment corridors", value: "48" }
+  { label: "Merchant access", value: "JWT protected" },
+  { label: "Realtime delivery", value: "Socket enabled" },
+  { label: "Wallet routing", value: "Custody aware" }
 ];
 
 const features = [

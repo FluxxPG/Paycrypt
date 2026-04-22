@@ -1,206 +1,161 @@
-# Paycrypt Crypto Gateway SaaS
+# Paycrypt
 
-Paycrypt is a production-oriented crypto payment gateway platform built as a multi-service TypeScript monorepo. It provides a Stripe-like payment API, hosted crypto checkout, merchant and super-admin dashboards, JWT authentication, long-lived developer API keys, realtime payment updates, usage-metered subscriptions, webhook delivery, and worker-based settlement orchestration.
+Paycrypt is a crypto-native payment gateway SaaS platform built as a TypeScript monorepo. It includes a Next.js merchant and admin frontend, an Express API, a Socket.IO realtime gateway, BullMQ workers, a Supabase PostgreSQL data model, and deployment assets for Vercel plus AWS EC2.
 
-## Live deployment
+## Canonical Workspace
 
-- Frontend: https://paycrypt-web-live.vercel.app
-- Public developer docs: https://paycrypt-web-live.vercel.app/docs
-- API edge: https://d1jm86cy6nqs8t.cloudfront.net
-- Backend origin: http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4000
-- WebSocket origin: http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001
+The only active project folder is:
+
+- [C:\Users\salma\paycrypt](/C:/Users/salma/paycrypt)
+
+This is the single source of truth for code, deployment config, Supabase migrations, seed scripts, documentation, and AWS assets.
+
+## Live Deployment
+
+- Frontend: [https://paycrypt-web-live.vercel.app](https://paycrypt-web-live.vercel.app)
+- Public docs: [https://paycrypt-web-live.vercel.app/docs](https://paycrypt-web-live.vercel.app/docs)
+- API edge: [https://d1jm86cy6nqs8t.cloudfront.net](https://d1jm86cy6nqs8t.cloudfront.net)
+- API ready: [https://d1jm86cy6nqs8t.cloudfront.net/ready](https://d1jm86cy6nqs8t.cloudfront.net/ready)
+- WS ready: [http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001/ready](http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001/ready)
 - AWS region: `ap-south-1`
-- Database: Supabase PostgreSQL via shared session pooler
 
-## Repository layout
+Latest verified frontend production deployment:
 
-- `apps/web`: Next.js App Router frontend for landing page, merchant console, admin console, hosted checkout, and public payment pages
-- `apps/api`: Express REST API with JWT auth, API keys, payment lifecycle, webhooks, billing, admin controls, and merchant data APIs
-- `apps/ws`: Socket.IO realtime gateway with Redis fan-out and payment event delivery
-- `apps/worker`: BullMQ worker cluster for monitoring, retries, settlement processing, webhook delivery, and telemetry heartbeats
-- `packages/shared`: shared Zod schemas, domain types, plan definitions, and cross-service contracts
-- `packages/sdk`: Node.js SDK for merchant integrations
-- `supabase/migrations`: complete PostgreSQL schema and indexes for Supabase
-- `infra/aws`: EC2, Docker Compose, and deployment assets
-- `docs`: supporting platform notes
+- project: `paycrypt-web-live`
+- deployment URL: [https://paycrypt-web-live-e3jmt8nla-numans-projects-a947d1ec.vercel.app](https://paycrypt-web-live-e3jmt8nla-numans-projects-a947d1ec.vercel.app)
+- created: `2026-04-22 20:37:04 IST`
 
-## Platform architecture
+## Platform Scope
+
+- merchant login and dashboard
+- super-admin login and dashboard
+- JWT access tokens plus refresh-token cookies
+- Stripe-like API key model with `pk_live_` and `sk_live_`
+- hosted crypto checkout at `/pay/[id]`
+- public payment-link pages at `/links/[id]`
+- realtime payment updates through Socket.IO
+- BullMQ background processing and settlement workflows
+- Supabase PostgreSQL schema and migrations
+- Node SDK
+- Binance custodial integration hooks
+- feature-gated non-custodial wallet onboarding
+- first-login merchant password setup flow
+- admin merchant create, update, suspend, and delete lifecycle
+
+## Monorepo Layout
+
+```text
+paycrypt/
+|-- apps/
+|   |-- api/
+|   |-- web/
+|   |-- ws/
+|   `-- worker/
+|-- packages/
+|   |-- shared/
+|   `-- sdk/
+|-- supabase/
+|   `-- migrations/
+|-- infra/
+|   `-- aws/
+|-- scripts/
+|-- docs/
+|-- .env.example
+|-- docker-compose.yml
+|-- package.json
+`-- vercel.json
+```
+
+Additional repo structure details:
+
+- [docs/PROJECT_STRUCTURE.md](/C:/Users/salma/paycrypt/docs/PROJECT_STRUCTURE.md)
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    MerchantUser[Merchant User] --> Web[Vercel Next.js Frontend]
-    AdminUser[Super Admin] --> Web
-    Buyer[Checkout Buyer] --> Web
+    Merchant["Merchant User"] --> Web["Vercel Next.js Frontend"]
+    Admin["Super Admin"] --> Web
+    Buyer["Checkout Buyer"] --> Web
 
-    Web --> Edge[CloudFront HTTPS Edge]
-    SDK[Node SDK / Merchant Server] --> Edge
-    MerchantBackend[Merchant Backend via API Keys] --> Edge
+    SDK["Node SDK / Merchant Backend"] --> Edge["CloudFront HTTPS Edge"]
+    Web --> Edge
 
-    Edge --> API[Express API on EC2 :4000]
-    Edge --> WS[Socket.IO Gateway on EC2 :4001]
+    Edge --> API["Express API on EC2 :4000"]
+    Edge --> WS["Socket.IO Gateway on EC2 :4001"]
 
-    API --> Redis[(Redis 7)]
+    API --> Redis["Redis 7"]
     WS --> Redis
-    Worker[BullMQ Worker Cluster] --> Redis
+    Worker["BullMQ Workers"] --> Redis
 
-    API --> Supabase[(Supabase Postgres)]
-    WS --> Supabase
-    Worker --> Supabase
+    API --> DB["Supabase PostgreSQL"]
+    Worker --> DB
+    WS --> DB
 
-    API --> Binance[Binance Custodial APIs]
+    API --> Binance["Binance Wallet APIs"]
     Worker --> Binance
-    Worker --> Tron[TRON / TRC20]
-    Worker --> Ethereum[Ethereum / ERC20]
-    Worker --> Solana[Solana]
+    Worker --> Chains["TRON / Ethereum / Solana Observers"]
 
-    API --> Webhooks[Merchant Webhook Endpoints]
-    Worker --> Webhooks
+    API --> MerchantHooks["Merchant Webhooks"]
+    Worker --> MerchantHooks
 ```
 
-## Request and event flow
+## Main Flows
 
 ### Merchant dashboard flow
 
-1. Merchant opens the Vercel frontend.
-2. Frontend calls the CloudFront HTTPS API endpoint.
-3. API authenticates the merchant with JWT access tokens and refresh-token cookies.
-4. Dashboard APIs read metrics, payments, transactions, wallets, API keys, subscriptions, and webhook logs from Supabase.
-5. Realtime payment state changes arrive over Socket.IO through CloudFront and Redis pub/sub.
+1. Merchant signs in on the Vercel frontend.
+2. Frontend calls the CloudFront API edge using JWT access tokens plus refresh cookies.
+3. Dashboard APIs fetch ledger, wallet, billing, API key, webhook, and analytics data from Supabase.
+4. Realtime status changes arrive through the WS gateway.
+
+### First-login password setup flow
+
+1. Admin creates a merchant from the admin panel.
+2. API creates the merchant user with a temporary password and `must_change_password=true`.
+3. Merchant signs in once with the temporary password.
+4. Frontend redirects to `/setup-password`.
+5. API updates the password, clears the forced-reset flag, rotates refresh state, and returns a fresh JWT.
+6. Merchant is then allowed into the dashboard.
 
 ### Hosted checkout flow
 
-1. Merchant creates a payment intent or payment link through dashboard APIs or API keys.
-2. If the request omits `settlementCurrency` and `network`, API resolves the merchant's saved default checkout route first.
-3. API stores the payment, pricing quote, network choice, expiry, wallet route, and hosted-checkout metadata.
-4. Buyer lands on `/pay/[id]` and sees supported network choices for that payment, QR code, wallet address, timer, and live state.
-5. Worker services observe custody and chain activity.
-6. Payment state progresses through `payment.created`, `payment.pending`, `payment.confirmed`, or `payment.failed`.
-7. Webhook jobs and settlement jobs are queued and processed asynchronously.
+1. Merchant creates a payment intent or payment-link checkout.
+2. API resolves the wallet route and quote.
+3. Buyer lands on `/pay/[id]`.
+4. Frontend fetches public payment state from the live API edge.
+5. Realtime payment updates are displayed until confirmation, expiry, or failure.
 
-### Admin control flow
+### Admin flow
 
-1. Super admin logs in through the dedicated admin login.
-2. Admin dashboard manages merchants, wallet eligibility, subscriptions, revenue views, risk views, API keys, and operational status.
-3. Non-custodial access is feature-gated per merchant and controlled centrally.
+1. Super admin signs in through `/admin/login`.
+2. Admin console manages merchants, wallet eligibility, subscriptions, custody controls, API keys, revenue, and risk.
+3. Non-custodial capability remains hidden from merchants until enabled by admin policy.
 
-## Core feature map
+## Local Development
 
-### Authentication
+1. Create the root `.env` from `.env.example`.
+2. Install dependencies:
 
-- Custom JWT access tokens with 30 minute expiry
-- Refresh tokens stored as HTTP-only cookies and persisted in PostgreSQL
-- Cross-site production refresh flow configured with `Secure` and `SameSite=None`
-- Merchant and admin consoles separated by role-aware login routing
+```bash
+npm install
+```
 
-### API key platform
-
-- Public keys with `pk_live_...`
-- Secret keys with `sk_live_...`
-- Scoped permissions
-- Manual rotation support
-- Per-key rate limiting and usage tracking
-- Stripe-like payment APIs for payments, payment links, transactions, subscriptions, and webhooks
-
-### Wallet model
-
-- Default custodial wallet path through Binance
-- Feature-gated non-custodial support for TRON, Ethereum, and Solana
-- Super-admin control over merchant eligibility for non-custodial wallets
-- Pricing and subscription gating layered on top of wallet access
-- Merchant-level accepted route settings with a persisted default checkout route
-
-### Realtime and jobs
-
-- Socket.IO gateway for payment and merchant room subscriptions
-- Redis pub/sub for cross-node event fan-out
-- BullMQ workers on Redis 7 for:
-  - payment confirmation checks
-  - Binance transaction monitoring
-  - blockchain monitoring
-  - webhook dispatch
-  - settlement processing
-
-### Billing and subscriptions
-
-- Starter, Business, Premium, and Custom plan shapes in shared configuration
-- Usage tracking for API activity and transaction volume
-- Billing invoice support in PostgreSQL
-- Merchant billing summaries and admin subscription controls
-
-## Services and runtime responsibilities
-
-### Frontend
-
-- Next.js 15 App Router
-- TypeScript
-- TailwindCSS
-- Framer Motion
-- Merchant dashboard
-- Super-admin dashboard
-- Hosted checkout and public payment-link pages
-
-### API
-
-- Express TypeScript service
-- JWT auth, refresh token issuance, API key verification
-- Payment creation, payment link creation, transactions, subscriptions, webhooks, admin APIs
-- Redis-backed telemetry and realtime event publishing
-
-### Realtime gateway
-
-- Socket.IO server
-- Merchant room and payment room subscriptions
-- Redis subscriber for broadcasting payment events
-- Health telemetry written back to PostgreSQL
-
-### Worker cluster
-
-- BullMQ queues and workers
-- Webhook retries and status logging
-- Settlement persistence
-- Chain observation hooks and custody monitors
-- Worker heartbeat metrics
-
-## Database model
-
-Supabase PostgreSQL stores the platform state with indexed relational tables including:
-
-- `users`
-- `merchants`
-- `api_keys`
-- `wallets`
-- `payments`
-- `transactions`
-- `subscriptions`
-- `usage_logs`
-- `webhook_logs`
-- `audit_logs`
-- `billing_invoices`
-- `settlements`
-- `refresh_tokens`
-- `worker_heartbeats`
-- `ws_health`
-
-Run migrations with:
+3. Run migrations:
 
 ```bash
 npm run migrate:db
 ```
 
-Seed demo data with:
+4. Seed identities:
 
 ```bash
 npm run seed:demo
 ```
 
-## Local development
+`seed:demo` now creates only the canonical merchant and super-admin identities. It does not inject demo payments, demo wallets, demo invoices, or fake dashboard analytics rows.
 
-1. Copy `.env.example` to `.env`.
-2. Install dependencies with `npm install`.
-3. Ensure Redis 6 or Redis 7 is running locally.
-4. Run `npm run migrate:db`.
-5. Run `npm run seed:demo`.
-6. Start the services:
+5. Start the services:
 
 ```bash
 npm run dev:api
@@ -215,93 +170,53 @@ Default local URLs:
 - API: `http://localhost:4000`
 - WS: `http://localhost:4001`
 
-## Production deployment
+Full setup details:
 
-### Backend on AWS EC2
+- [docs/LOCAL_SETUP.md](/C:/Users/salma/paycrypt/docs/LOCAL_SETUP.md)
 
-The backend stack is designed to run with Docker Compose on EC2 and consists of:
+## Deployment
 
-- API service
-- WebSocket service
-- Worker service
-- Redis service
+### Frontend
 
-Deploy path:
+- platform: Vercel
+- project: `paycrypt-web-live`
+- repo deploy path: canonical repo root via `vercel.json`
 
-1. Bootstrap the EC2 host with Docker, Node, and Git.
-2. Copy the repository and production `.env` to `/opt/paycrypt`.
-3. Run `docker compose up -d --build`.
-4. Place CloudFront in front of the EC2 API and WebSocket ports.
-5. Point the frontend to the CloudFront distribution URL.
+Required frontend envs:
 
-Important production note:
+```env
+NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net
+NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net
+NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app
+```
 
-- Supabase direct connections for this project resolve to IPv6 only from AWS, so the backend uses the Supabase shared session pooler connection string for IPv4-compatible access.
+If Vercel reports `No Output Directory named "public" found`, the project has been configured like a static site. Remove the custom `Output Directory` value and keep the framework preset as `Next.js`.
 
-### Frontend on Vercel
+### Backend
 
-The frontend is deployed separately from the backend.
+- platform: AWS EC2
+- services: `api`, `ws`, `worker`, `redis`
+- deploy path: `/opt/paycrypt`
 
-Required public build env values:
+Detailed deployment notes:
 
-- `NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net`
-- `NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net`
-- `NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app`
+- [docs/deployment.md](/C:/Users/salma/paycrypt/docs/deployment.md)
 
-The active frontend deployment is:
+## Docs
 
-- `https://paycrypt-web-live.vercel.app`
+- API overview: [docs/api.md](/C:/Users/salma/paycrypt/docs/api.md)
+- Binance notes: [docs/binance.md](/C:/Users/salma/paycrypt/docs/binance.md)
+- Live verification notes: [docs/LIVE_STATUS.md](/C:/Users/salma/paycrypt/docs/LIVE_STATUS.md)
+- Local setup: [docs/LOCAL_SETUP.md](/C:/Users/salma/paycrypt/docs/LOCAL_SETUP.md)
+- Project structure: [docs/PROJECT_STRUCTURE.md](/C:/Users/salma/paycrypt/docs/PROJECT_STRUCTURE.md)
 
-## Security posture
-
-- JWT access tokens with short expiry
-- Refresh tokens stored in PostgreSQL and transmitted via HTTP-only secure cookies
-- API key hashing
-- Redis-backed rate limiting
-- Idempotency protection for API operations
-- Webhook signature support
-- Role-based merchant and super-admin separation
-- BullMQ job retries for delivery and settlement reliability
-
-## Operational checks
-
-### Health endpoints
-
-- API readiness: `https://d1jm86cy6nqs8t.cloudfront.net/ready`
-- API origin readiness: `http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4000/ready`
-
-### Verified live checks
-
-- CloudFront `/ready` returns healthy database and Redis state
-- Merchant login works through the live backend
-- Merchant dashboard overview returns live seeded data
-- Vercel frontend login page is publicly reachable
-- Cross-origin login from Vercel origin returns `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials: true`
-- Refresh cookie is issued with `Secure` and `SameSite=None`
-
-## Demo credentials
+## Demo Credentials
 
 - Merchant: `owner@nebula.dev` / `ChangeMe123!`
 - Admin: `admin@cryptopay.dev` / `AdminChangeMe123!`
 
+New merchants created by the admin panel receive a temporary password and are forced through first-login password setup before dashboard access is allowed.
 
-## Binance testing reality
+## Binance Reality
 
-Binance Spot Testnet exists, but according to the official Binance documentation it only supports `/api` Spot endpoints and does not expose `/sapi` wallet and capital endpoints. Paycrypt's custodial wallet flow uses Binance wallet SAPI endpoints such as deposit address lookup and deposit history, so real Binance API credentials are required for end-to-end custodial testing.
-
-What this means in practice:
-
-- The platform is live and working without Binance credentials for dashboards, auth, hosted checkout UI, Supabase, Redis, workers, admin controls, and non-custodial chain monitoring paths.
-- Custodial Binance wallet issuance and Binance deposit monitoring are code-complete but not activated until `BINANCE_API_KEY` and `BINANCE_API_SECRET` are set.
-- Spot Testnet can still be useful for separate trading-only experiments, but it is not a substitute for wallet SAPI validation in this codebase.
-## Environment model
-
-Use the shared pooler on IPv4-only environments.
-
-Example production database URL:
-
-```bash
-postgresql://postgres.lqpionhiifsjehyqeydm:<PASSWORD>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
-```
-
-See `.env.example` for the full variable list.
+The platform is live without Binance credentials, but live custodial wallet issuance and Binance-backed settlement verification still require real `BINANCE_API_KEY` and `BINANCE_API_SECRET` values in the backend environment. Binance Spot Testnet does not replace the wallet `/sapi` paths used by this custody model.

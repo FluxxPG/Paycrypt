@@ -48,9 +48,9 @@ export default function HomePage() {
           </div>
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
             {[
-              { label: "Uptime SLA", value: "99.95%" },
-              { label: "Avg confirm", value: "< 18s" },
-              { label: "Webhook retries", value: "12x" }
+              { label: "Platform state", value: "API connected" },
+              { label: "Realtime layer", value: "WS active" },
+              { label: "Checkout mode", value: "Hosted flow" }
             ].map((stat) => (
               <div key={stat.label} className="glass-soft rounded-2xl px-5 py-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stat.label}</p>
@@ -75,9 +75,9 @@ export default function HomePage() {
             </p>
             <div className="mt-6 grid gap-4 md:grid-cols-3">
               {[
-                { label: "payment.created", value: "120ms avg" },
-                { label: "payment.pending", value: "real-time" },
-                { label: "payment.confirmed", value: "multi-chain" }
+                { label: "payment.created", value: "event stream" },
+                { label: "payment.pending", value: "status broadcast" },
+                { label: "payment.confirmed", value: "settlement aware" }
               ].map((item) => (
                 <div key={item.label} className="glass-soft rounded-2xl px-4 py-3">
                   <p className="text-xs uppercase tracking-wide text-slate-500">{item.label}</p>
