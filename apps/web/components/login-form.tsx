@@ -7,6 +7,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
+import { getApiBaseUrl } from "../lib/runtime-config";
 import { clearAccessToken, setAccessToken } from "../lib/session";
 import { defaultConsoleForRole, isAdminRole, type AppRole } from "../lib/roles";
 
@@ -56,13 +57,9 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
     setError(null);
 
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+      const baseUrl = getApiBaseUrl();
 
-      if (!baseUrl) {
-        throw new Error("Merchant API endpoint is not configured for this deployment.");
-      }
-
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/login`, {
+      const response = await fetch(`${baseUrl}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -83,7 +80,7 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
 
       if (!matchesConsole) {
         clearAccessToken();
-        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/logout`, {
+        await fetch(`${baseUrl}/auth/logout`, {
           method: "POST",
           credentials: "include"
         }).catch(() => undefined);

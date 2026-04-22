@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { apiFetch } from "../lib/authed-fetch";
+import { getApiBaseUrl } from "../lib/runtime-config";
 import { clearAccessToken } from "../lib/session";
 
 type MeResponse = {
@@ -37,7 +38,7 @@ export const SessionControls = () => {
   const logout = async () => {
     setBusy(true);
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/logout`, {
+      await fetch(`${getApiBaseUrl()}/auth/logout`, {
         method: "POST",
         credentials: "include"
       });

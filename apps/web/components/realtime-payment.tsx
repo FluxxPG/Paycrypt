@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
+import { getApiBaseUrl, getWsBaseUrl } from "../lib/runtime-config";
 import { Badge } from "./ui/badge";
 
 export const RealtimePayment = ({
@@ -20,8 +21,7 @@ export const RealtimePayment = ({
   const [status, setStatus] = useState(initialStatus);
 
   useEffect(() => {
-    const realtimeBaseUrl =
-      process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4001";
+    const realtimeBaseUrl = getWsBaseUrl();
     const usePollingOnly =
       /^https:\/\/.*cloudfront\.net$/i.test(realtimeBaseUrl) ||
       process.env.NEXT_PUBLIC_WS_TRANSPORT === "polling";
@@ -48,6 +48,21 @@ export const RealtimePayment = ({
     socket.on("payment.confirmed", update);
     socket.on("payment.failed", update);
     socket.on("payment.expired", update);
+
+    if (!usePollingOnly) {
+      socket.on("connect_error", async () => {
+        try {
+          const response = await fetch(`${getApiBaseUrl()}/public/payments/${paymentId}`, {
+            cache: "no-store"
+          });
+          if (!response.ok) return;
+          const payload = (await response.json()) as { status?: string };
+          if (payload.status) update({ status: payload.status });
+        } catch {
+          // Ignore polling fallback errors here; the UI will keep its current state.
+        }
+      });
+    }
 
     return () => {
       socket.disconnect();

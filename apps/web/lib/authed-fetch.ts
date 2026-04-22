@@ -2,10 +2,12 @@
 
 import { accessTokenKey } from "./session";
 import { setAccessToken, clearAccessToken } from "./session";
+import { getApiBaseUrl } from "./runtime-config";
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const apiBaseUrl = getApiBaseUrl();
   const request = async (token: string | null) =>
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}${path}`, {
+    fetch(`${apiBaseUrl}${path}`, {
       ...init,
       cache: "no-store",
       credentials: "include",
@@ -21,7 +23,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     const response = await request(token);
 
     if (response.status === 401) {
-      const refresh = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/refresh`, {
+      const refresh = await fetch(`${apiBaseUrl}/auth/refresh`, {
         method: "POST",
         credentials: "include"
       });

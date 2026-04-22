@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { getApiBaseUrl } from "../lib/runtime-config";
 
 type PaymentLink = {
   id: string;
@@ -29,7 +30,7 @@ export const PaymentLinkPanel = ({ paymentLink }: { paymentLink: PaymentLink }) 
     setError(null);
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL}/public/payment_links/${paymentLink.id}/checkout`,
+        `${getApiBaseUrl()}/public/payment_links/${paymentLink.id}/checkout`,
         {
           method: "POST",
           headers: {
