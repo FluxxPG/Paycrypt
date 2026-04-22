@@ -1,10 +1,31 @@
 import "dotenv/config";
+import dns from "node:dns";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
 
+const originalLookup = dns.lookup.bind(dns);
+dns.lookup = (hostname, options, callback) => {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
+
+  const normalized = typeof options === "number" ? { family: options } : { ...(options ?? {}) };
+  if (typeof hostname === "string" && hostname.includes(".supabase.co")) {
+    normalized.family = 4;
+  }
+
+  return originalLookup(hostname, normalized, callback);
+};
+
 const db = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  ...(
+    process.env.DATABASE_URL.includes(".supabase.co") || process.env.DATABASE_URL.includes("sslmode=")
+      ? { ssl: { rejectUnauthorized: false } }
+      : {}
+  )
 });
 
 const merchantId = "mrc_demo";

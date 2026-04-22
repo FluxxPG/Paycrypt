@@ -34,11 +34,16 @@ authRouter.post("/login", async (req, res) => {
     [user.id, refreshToken]
   );
 
-  res.cookie("refresh_token", refreshToken, {
+  const cookieOptions = {
     httpOnly: true,
     secure: env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/"
+    sameSite: (env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
+    path: "/",
+    ...(env.COOKIE_DOMAIN && env.COOKIE_DOMAIN !== "localhost" ? { domain: env.COOKIE_DOMAIN } : {})
+  };
+
+  res.cookie("refresh_token", refreshToken, {
+    ...cookieOptions
   });
 
   const responsePayload = { accessToken, user: { id: user.id, role: user.role, merchantId: user.merchant_id } };
@@ -76,7 +81,13 @@ authRouter.post("/logout", async (req, res) => {
   if (token) {
     await query("update refresh_tokens set revoked_at = now() where token = $1", [token]);
   }
-  res.clearCookie("refresh_token");
+  res.clearCookie("refresh_token", {
+    httpOnly: true,
+    secure: env.NODE_ENV === "production",
+    sameSite: (env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
+    path: "/",
+    ...(env.COOKIE_DOMAIN && env.COOKIE_DOMAIN !== "localhost" ? { domain: env.COOKIE_DOMAIN } : {})
+  });
   res.json({ success: true });
 });
 

@@ -1,0 +1,28 @@
+[
+  {
+    "ResourceType": "instance",
+    "Tags": [
+      {
+        "Key": "Name",
+        "Value": "paycrypt-backend"
+      },
+      {
+        "Key": "awsApplication",
+        "Value": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+      }
+    ]
+  },
+  {
+    "ResourceType": "volume",
+    "Tags": [
+      {
+        "Key": "Name",
+        "Value": "paycrypt-backend-volume"
+      },
+      {
+        "Key": "awsApplication",
+        "Value": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+      }
+    ]
+  }
+]

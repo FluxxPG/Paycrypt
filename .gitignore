@@ -12,3 +12,5 @@ apps/web/.next
 apps/web/out
 apps/api/dist
 apps/worker/dist
+
+.vercel

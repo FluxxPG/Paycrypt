@@ -1,6 +1,15 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { AuthGate } from "../../components/auth-gate";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return <AuthGate>{children}</AuthGate>;
+  const pathname = usePathname();
+
+  if (pathname === "/admin/login") {
+    return <>{children}</>;
+  }
+
+  return <AuthGate consoleType="admin">{children}</AuthGate>;
 }

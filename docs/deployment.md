@@ -13,6 +13,8 @@
 - Install Docker and Docker Compose
 - Clone the repository
 - Copy `.env.example` to `.env`
+- Run `npm ci`
+- Run `npm run migrate:db`
 - Set production values for:
   - `DATABASE_URL`
   - `REDIS_URL`
@@ -29,9 +31,11 @@
   - `WORKER_NAME`
   - wallet provider credentials
 - Run `docker compose up -d --build`
+- Or use `bash infra/aws/deploy.sh`
 - Expose the API container on port `4000` directly or front it with an AWS Application Load Balancer
 - Expose the realtime gateway on port `4001` directly or keep it private behind the same security group
 - Terminate TLS outside the container stack if you need HTTPS, for example at the ALB or CloudFront edge
+- No Nginx is required for the stack unless you explicitly want it for local reverse proxying
 - Use Redis 6/7 with Lua scripting enabled (BullMQ requires Lua).
  - Configure a dedicated Binance API key with `Enable Spot & Margin Trading` + `Enable Withdrawals` (if settlement requires).
  - Whitelist your EC2 IP in Binance API settings if IP restrictions are enabled.

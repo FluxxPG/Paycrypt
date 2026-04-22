@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { randomUUID } from "node:crypto";
+import dns from "node:dns";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import Redis from "ioredis";
 import { Server } from "socket.io";
@@ -7,6 +8,20 @@ import type { RealtimePaymentEvent } from "@cryptopay/shared";
 import { Pool } from "pg";
 
 config();
+const originalLookup = dns.lookup.bind(dns);
+dns.lookup = ((hostname, options, callback) => {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
+
+  const normalized = typeof options === "number" ? { family: options } : { ...(options ?? {}) };
+  if (typeof hostname === "string" && hostname.includes(".supabase.co")) {
+    normalized.family = 4;
+  }
+
+  return originalLookup(hostname, normalized as never, callback as never);
+}) as typeof dns.lookup;
 
 const wsPort = Number(process.env.WS_PORT ?? 4001);
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -14,7 +29,13 @@ const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: null
 });
 const instanceId = randomUUID();
-const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const needsSsl =
+  (process.env.DATABASE_URL ?? "").includes(".supabase.co") ||
+  (process.env.DATABASE_URL ?? "").includes("sslmode=");
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {})
+});
 const wsNodeId = process.env.WS_NODE_ID ?? instanceId;
 
 const sendJson = (statusCode: number, payload: Record<string, unknown>, res: ServerResponse<IncomingMessage>) => {

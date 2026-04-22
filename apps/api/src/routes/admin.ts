@@ -160,14 +160,14 @@ adminRouter.post("/api-keys", requireAdmin(true), async (req, res) => {
 
 adminRouter.post("/api-keys/:id/rotate", requireAdmin(true), async (req, res) => {
   const { merchantId } = req.body as { merchantId: string };
-  const responsePayload = await rotateApiKeyForAdmin(merchantId, req.params.id, (req as any).actor.userId);
+  const responsePayload = await rotateApiKeyForAdmin(merchantId, String(req.params.id), (req as any).actor.userId);
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);
 });
 
 adminRouter.delete("/api-keys/:id", requireAdmin(true), async (req, res) => {
   const { merchantId } = req.body as { merchantId: string };
-  await revokeApiKeyForAdmin(merchantId, req.params.id, (req as any).actor.userId);
+  await revokeApiKeyForAdmin(merchantId, String(req.params.id), (req as any).actor.userId);
   res.json({ success: true });
 });
 
@@ -188,7 +188,11 @@ adminRouter.get("/wallet-verifications", async (req, res) => {
 
 adminRouter.post("/wallet-verifications/:id/approve", requireAdmin(true), async (req, res) => {
   const { merchantId } = req.body as { merchantId: string };
-  const responsePayload = await approveWalletVerificationForAdmin(req.params.id, merchantId, (req as any).actor.userId);
+  const responsePayload = await approveWalletVerificationForAdmin(
+    String(req.params.id),
+    merchantId,
+    (req as any).actor.userId
+  );
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);
 });
@@ -198,7 +202,7 @@ adminRouter.get("/alerts", async (_req, res) => {
 });
 
 adminRouter.post("/alerts/:id/resolve", requireAdmin(true), async (req, res) => {
-  const result = await resolveSystemAlert(req.params.id);
+  const result = await resolveSystemAlert(String(req.params.id));
   if (!result) {
     return res.status(404).json({ message: "Alert not found" });
   }
@@ -209,7 +213,7 @@ adminRouter.patch("/webhooks/:id", requireAdmin(true), async (req, res) => {
   const { merchantId, isActive } = req.body as { merchantId: string; isActive: boolean };
   const responsePayload = await toggleWebhookEndpointForAdmin(
     merchantId,
-    req.params.id,
+    String(req.params.id),
     Boolean(isActive),
     (req as any).actor.userId
   );
@@ -219,14 +223,18 @@ adminRouter.patch("/webhooks/:id", requireAdmin(true), async (req, res) => {
 
 adminRouter.post("/webhooks/:id/rotate", requireAdmin(true), async (req, res) => {
   const { merchantId } = req.body as { merchantId: string };
-  const responsePayload = await rotateWebhookEndpointForAdmin(merchantId, req.params.id, (req as any).actor.userId);
+  const responsePayload = await rotateWebhookEndpointForAdmin(
+    merchantId,
+    String(req.params.id),
+    (req as any).actor.userId
+  );
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);
 });
 
 adminRouter.delete("/webhooks/:id", requireAdmin(true), async (req, res) => {
   const { merchantId } = req.body as { merchantId: string };
-  await revokeWebhookEndpointForAdmin(merchantId, req.params.id, (req as any).actor.userId);
+  await revokeWebhookEndpointForAdmin(merchantId, String(req.params.id), (req as any).actor.userId);
   res.json({ success: true });
 });
 

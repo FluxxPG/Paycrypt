@@ -59,7 +59,7 @@ export const LoginSwitcher = () => {
         </div>
       </div>
 
-      <LoginForm variant={variant} onSuccessRedirect={variant === "admin" ? "/admin" : "/dashboard"} />
+      <LoginForm variant={variant} />
     </div>
   );
 };

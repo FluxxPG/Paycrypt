@@ -1,4 +1,5 @@
 import { config } from "dotenv";
+import dns from "node:dns";
 import { Queue, QueueEvents, Worker } from "bullmq";
 import Redis from "ioredis";
 import { Pool } from "pg";
@@ -6,11 +7,31 @@ import { observePayment } from "./providers.js";
 import { recordWorkerMetric } from "./telemetry.js";
 
 config();
+const originalLookup = dns.lookup.bind(dns);
+dns.lookup = ((hostname, options, callback) => {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
+
+  const normalized = typeof options === "number" ? { family: options } : { ...(options ?? {}) };
+  if (typeof hostname === "string" && hostname.includes(".supabase.co")) {
+    normalized.family = 4;
+  }
+
+  return originalLookup(hostname, normalized as never, callback as never);
+}) as typeof dns.lookup;
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: null
 });
-const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const needsSsl =
+  (process.env.DATABASE_URL ?? "").includes(".supabase.co") ||
+  (process.env.DATABASE_URL ?? "").includes("sslmode=");
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {})
+});
 const workerName = process.env.WORKER_NAME ?? "cryptopay-worker";
 
 type QueueMode = "bullmq" | "fallback";

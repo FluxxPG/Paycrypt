@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
-import { setAccessToken } from "../lib/session";
+import { clearAccessToken, setAccessToken } from "../lib/session";
+import { defaultConsoleForRole, isAdminRole, type AppRole } from "../lib/roles";
 
 type LoginFormProps = {
   variant?: "merchant" | "admin";
@@ -43,10 +44,24 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
         throw new Error(data.message ?? "Login failed");
       }
 
+      const role = data.user?.role as AppRole | undefined;
+      const matchesConsole = variant === "admin" ? isAdminRole(role) : role === "merchant";
+
+      if (!matchesConsole) {
+        clearAccessToken();
+        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/logout`, {
+          method: "POST",
+          credentials: "include"
+        }).catch(() => undefined);
+        throw new Error(
+          variant === "admin"
+            ? "This account belongs to the merchant console. Use merchant login instead."
+            : "This account belongs to the admin console. Use admin login instead."
+        );
+      }
+
       setAccessToken(data.accessToken);
-      const role = data.user?.role as string | undefined;
-      const redirect =
-        onSuccessRedirect ?? (role === "admin" || role === "super_admin" ? "/admin" : "/dashboard");
+      const redirect = onSuccessRedirect ?? defaultConsoleForRole(role);
       router.push(redirect);
       router.refresh();
     } catch (err) {
