@@ -756,7 +756,19 @@ export const provisionCustodialWallet = async (
   input: { asset: string; network: string }
 ) => {
   await assertMerchantPlatformAccess(merchantId);
-  const deposit = await getBinanceDepositAddress(input.asset, input.network);
+  let deposit;
+  try {
+    deposit = await getBinanceDepositAddress(input.asset, input.network);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Binance API credentials are not configured")) {
+      throw new AppError(
+        503,
+        "custodial_provider_unavailable",
+        "Binance custodial provisioning is unavailable until Binance API credentials are configured"
+      );
+    }
+    throw error;
+  }
 
   return withTransaction(async (client) => {
     const selectedResult = await client.query<{ id: string }>(

@@ -20,9 +20,18 @@ export const RealtimePayment = ({
   const [status, setStatus] = useState(initialStatus);
 
   useEffect(() => {
-    const socket = io(
-      process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4001"
-    );
+    const realtimeBaseUrl =
+      process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4001";
+    const usePollingOnly =
+      /^https:\/\/.*cloudfront\.net$/i.test(realtimeBaseUrl) ||
+      process.env.NEXT_PUBLIC_WS_TRANSPORT === "polling";
+
+    const socket = io(realtimeBaseUrl, {
+      transports: usePollingOnly ? ["polling"] : ["polling", "websocket"],
+      upgrade: !usePollingOnly,
+      reconnectionAttempts: 5,
+      timeout: 10000
+    });
     socket.emit("merchant:join", merchantId);
     socket.emit("payment:join", paymentId);
 
