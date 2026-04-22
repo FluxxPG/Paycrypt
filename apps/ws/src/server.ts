@@ -44,6 +44,23 @@ const sendJson = (statusCode: number, payload: Record<string, unknown>, res: Ser
 };
 
 const server = createServer(async (req, res) => {
+  if (req.method === "GET" && (req.url === "/" || req.url === "")) {
+    return sendJson(
+      200,
+      {
+        ok: true,
+        service: "paycrypt-ws",
+        status: "online",
+        endpoints: {
+          health: "/health",
+          ready: "/ready",
+          socketIo: "/socket.io"
+        }
+      },
+      res
+    );
+  }
+
   if (req.method === "GET" && req.url === "/health") {
     return sendJson(200, { ok: true, service: "ws" }, res);
   }
