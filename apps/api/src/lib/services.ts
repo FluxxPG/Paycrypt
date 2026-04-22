@@ -5,7 +5,9 @@ import {
   createWebhookEndpointSchema,
   supportedAssets,
   supportedNetworks,
-  planCatalog
+  planCatalog,
+  type SupportedAsset,
+  type SupportedNetwork
 } from "@cryptopay/shared";
 import { createApiKeyPair, createPaymentLinkReference, createPaymentReference } from "./keys.js";
 import { verifyMessage } from "ethers";
@@ -21,6 +23,7 @@ import { decryptSecret, encryptSecret, hmacSignWithSecret, hashValue } from "./s
 import { queues } from "./queue.js";
 import {
   assertMerchantCanAcceptPayment,
+  assertMerchantCanManageNonCustodialWallets,
   assertMerchantPlatformAccess,
   changeSubscriptionPlan,
   getMerchantBillingContext,
@@ -32,6 +35,73 @@ import { recordPaymentStatus } from "./telemetry.js";
 
 export const persistResponse = <T>(payload: T) => payload;
 export { listBillingInvoices };
+
+type CheckoutRoutePreference = {
+  asset: SupportedAsset;
+  networks: SupportedNetwork[];
+};
+
+const defaultCheckoutRoutes: CheckoutRoutePreference[] = [
+  { asset: "BTC", networks: ["BTC"] },
+  { asset: "ETH", networks: ["ERC20"] },
+  { asset: "USDT", networks: ["TRC20", "ERC20", "SOL"] }
+];
+
+const walletRouteMatrix: Record<SupportedAsset, SupportedNetwork[]> = {
+  BTC: ["BTC"],
+  ETH: ["ERC20"],
+  USDT: ["TRC20", "ERC20", "SOL"]
+};
+
+const isSupportedAsset = (value: string): value is SupportedAsset =>
+  supportedAssets.includes(value as SupportedAsset);
+
+const isSupportedNetwork = (value: string): value is SupportedNetwork =>
+  supportedNetworks.includes(value as SupportedNetwork);
+
+const normalizeCheckoutRoutes = (input: unknown): CheckoutRoutePreference[] => {
+  if (!Array.isArray(input)) {
+    return defaultCheckoutRoutes;
+  }
+
+  const normalized = input
+    .map((entry) => {
+      const asset = typeof entry === "object" && entry && "asset" in entry ? (entry.asset as string) : "";
+      const networks =
+        typeof entry === "object" && entry && "networks" in entry && Array.isArray(entry.networks)
+          ? entry.networks.filter(
+              (network: unknown): network is SupportedNetwork =>
+                typeof network === "string" && isSupportedNetwork(network)
+            )
+          : [];
+
+      if (!isSupportedAsset(asset)) {
+        return null;
+      }
+
+      const allowedNetworks = walletRouteMatrix[asset];
+      const filteredNetworks = Array.from(new Set<SupportedNetwork>(networks)).filter((network: SupportedNetwork) =>
+        allowedNetworks.includes(network)
+      );
+      return {
+        asset,
+        networks: filteredNetworks
+      };
+    })
+    .filter((entry): entry is CheckoutRoutePreference => Boolean(entry))
+    .filter((entry) => entry.networks.length > 0);
+
+  return normalized.length ? normalized : defaultCheckoutRoutes;
+};
+
+const getMerchantCheckoutRoutes = async (merchantId: string) => {
+  const result = await query<{ accepted_checkout_routes: unknown }>(
+    `select accepted_checkout_routes from merchants where id = $1 limit 1`,
+    [merchantId]
+  );
+
+  return normalizeCheckoutRoutes(result.rows[0]?.accepted_checkout_routes);
+};
 
 const getSelectedNonCustodialWallet = async (
   merchantId: string,
@@ -58,19 +128,46 @@ const getSelectedNonCustodialWallet = async (
   return result.rows[0] ?? null;
 };
 
+const getSelectedCustodialWallet = async (
+  merchantId: string,
+  asset: string,
+  network: string
+) => {
+  const result = await query<{
+    id: string;
+    address: string;
+    provider: string;
+  }>(
+    `select id, address, provider
+     from wallets
+     where merchant_id = $1
+       and wallet_type = 'custodial'
+       and asset = $2
+       and network = $3
+       and is_active = true
+     order by is_selected desc, created_at desc
+     limit 1`,
+    [merchantId, asset, network]
+  );
+  return result.rows[0] ?? null;
+};
+
 export const createPaymentIntent = async (merchantId: string, input: unknown) => {
   const parsed = createPaymentSchema.parse(input);
   await assertMerchantCanAcceptPayment(merchantId, parsed.settlementCurrency, parsed.network);
   const paymentId = createPaymentReference();
   const quote = await quoteCryptoAmount(parsed.settlementCurrency, parsed.fiatCurrency, parsed.amountFiat);
-  const routeMap: Record<(typeof supportedAssets)[number], (typeof supportedNetworks)[number][]> = {
-    BTC: ["BTC"],
-    ETH: ["ERC20"],
-    USDT: ["TRC20", "ERC20", "SOL"]
-  };
-  const supportedRouteNetworks = routeMap[parsed.settlementCurrency];
+  const acceptedCheckoutRoutes = await getMerchantCheckoutRoutes(merchantId);
+  const acceptedRoute = acceptedCheckoutRoutes.find((route) => route.asset === parsed.settlementCurrency);
+  const supportedRouteNetworks = (acceptedRoute?.networks ?? []).filter((network) =>
+    walletRouteMatrix[parsed.settlementCurrency].includes(network)
+  );
   if (!supportedRouteNetworks.includes(parsed.network)) {
-    throw new Error(`Network ${parsed.network} is not supported for ${parsed.settlementCurrency}`);
+    throw new AppError(
+      403,
+      "checkout_route_disabled",
+      `${parsed.settlementCurrency} on ${parsed.network} is not enabled in merchant checkout settings`
+    );
   }
 
   const walletRoutes: Record<
@@ -103,16 +200,44 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
       continue;
     }
 
-    const deposit = await getBinanceDepositAddress(parsed.settlementCurrency, network);
-    walletRoutes[network] = {
-      asset: parsed.settlementCurrency,
-      network,
-      address: deposit.address,
-      provider: "binance",
-      walletType: "custodial",
-      amountCrypto: quote.amountCrypto,
-      exchangeRate: quote.exchangeRate
-    };
+    const custodialWallet = await getSelectedCustodialWallet(merchantId, parsed.settlementCurrency, network);
+    if (custodialWallet) {
+      walletRoutes[network] = {
+        asset: parsed.settlementCurrency,
+        network,
+        address: custodialWallet.address,
+        provider: custodialWallet.provider ?? "binance",
+        walletType: "custodial",
+        amountCrypto: quote.amountCrypto,
+        exchangeRate: quote.exchangeRate,
+        sourceWalletId: custodialWallet.id
+      };
+      continue;
+    }
+
+    try {
+      const deposit = await getBinanceDepositAddress(parsed.settlementCurrency, network);
+      walletRoutes[network] = {
+        asset: parsed.settlementCurrency,
+        network,
+        address: deposit.address,
+        provider: "binance",
+        walletType: "custodial",
+        amountCrypto: quote.amountCrypto,
+        exchangeRate: quote.exchangeRate
+      };
+    } catch (error) {
+      if (network === parsed.network) {
+        throw error;
+      }
+    }
+  }
+  if (!walletRoutes[parsed.network]) {
+    throw new AppError(
+      503,
+      "checkout_route_unavailable",
+      `${parsed.settlementCurrency} on ${parsed.network} is currently unavailable for this merchant`
+    );
   }
   const walletAddress = walletRoutes[parsed.network].address;
   const expiresAt = new Date(Date.now() + parsed.expiresInMinutes * 60 * 1000);
@@ -153,12 +278,21 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
 
     for (const [network, route] of Object.entries(walletRoutes)) {
       if (route.sourceWalletId) {
-        await client.query(
-          `update wallets
-           set payment_id = $2, is_selected = $3, last_seen_at = null
-           where id = $1`,
-          [route.sourceWalletId, paymentId, network === parsed.network]
-        );
+        if (route.walletType === "non_custodial") {
+          await client.query(
+            `update wallets
+             set payment_id = $2, is_selected = $3, last_seen_at = null
+             where id = $1`,
+            [route.sourceWalletId, paymentId, network === parsed.network]
+          );
+        } else {
+          await client.query(
+            `update wallets
+             set is_selected = $2, last_seen_at = now()
+             where id = $1`,
+            [route.sourceWalletId, network === parsed.network]
+          );
+        }
       } else {
         await client.query(
           `insert into wallets (
@@ -187,7 +321,7 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
     "confirm-check",
     { paymentId },
     {
-      jobId: `confirm:${paymentId}`,
+      jobId: `confirm-${paymentId}`,
       delay: 30_000,
       attempts: 20,
       backoff: {
@@ -202,7 +336,7 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
     "monitor",
     { paymentId },
     {
-      jobId: `monitor:${paymentId}`,
+      jobId: `monitor-${paymentId}`,
       delay: 15_000,
       attempts: 20,
       backoff: {
@@ -245,6 +379,15 @@ export const fetchPayment = async (paymentId: string, merchantId?: string) => {
 export const createPaymentLink = async (merchantId: string, input: unknown) => {
   const parsed = createPaymentLinkSchema.parse(input);
   await assertMerchantPlatformAccess(merchantId);
+  const acceptedCheckoutRoutes = await getMerchantCheckoutRoutes(merchantId);
+  const acceptedRoute = acceptedCheckoutRoutes.find((route) => route.asset === parsed.settlementCurrency);
+  if (!acceptedRoute?.networks.includes(parsed.network)) {
+    throw new AppError(
+      403,
+      "checkout_route_disabled",
+      `${parsed.settlementCurrency} on ${parsed.network} is not enabled in merchant checkout settings`
+    );
+  }
   const linkId = createPaymentLinkReference();
 
   await query(
@@ -521,6 +664,7 @@ export const listWallets = async (merchantId: string) =>
       w.is_selected,
       w.last_seen_at,
       w.created_at,
+      case when w.payment_id is null then true else false end as is_manageable,
       coalesce(count(p.id), 0)::int as payment_count,
       coalesce(sum(case when p.status = 'confirmed' then 1 else 0 end), 0)::int as confirmed_count
      from wallets w
@@ -531,6 +675,184 @@ export const listWallets = async (merchantId: string) =>
      limit 100`,
     [merchantId]
   ).then((res) => res.rows);
+
+export const provisionCustodialWallet = async (
+  merchantId: string,
+  input: { asset: string; network: string }
+) => {
+  await assertMerchantPlatformAccess(merchantId);
+  const deposit = await getBinanceDepositAddress(input.asset, input.network);
+
+  return withTransaction(async (client) => {
+    const selectedResult = await client.query<{ id: string }>(
+      `select id
+       from wallets
+       where merchant_id = $1
+         and wallet_type = 'custodial'
+         and asset = $2
+         and network = $3
+         and is_selected = true
+       limit 1`,
+      [merchantId, input.asset, input.network]
+    );
+    const shouldSelect = !selectedResult.rows[0];
+
+    const existingResult = await client.query<{ id: string }>(
+      `select id
+       from wallets
+       where merchant_id = $1
+         and wallet_type = 'custodial'
+         and provider = 'binance'
+         and asset = $2
+         and network = $3
+         and address = $4
+       limit 1`,
+      [merchantId, input.asset, input.network, deposit.address]
+    );
+
+    if (existingResult.rows[0]) {
+      const result = await client.query(
+        `update wallets
+         set is_active = true,
+             is_selected = case when $3 then true else is_selected end,
+             last_seen_at = now()
+         where id = $1 and merchant_id = $2
+         returning *`,
+        [existingResult.rows[0].id, merchantId, shouldSelect]
+      );
+      return result.rows[0];
+    }
+
+    const result = await client.query(
+      `insert into wallets (
+        merchant_id,
+        wallet_type,
+        provider,
+        asset,
+        network,
+        address,
+        is_active,
+        is_selected,
+        last_seen_at
+      ) values ($1,'custodial','binance',$2,$3,$4,true,$5,now())
+      returning *`,
+      [merchantId, input.asset, input.network, deposit.address, shouldSelect]
+    );
+
+    return result.rows[0];
+  });
+};
+
+export const updateWalletForMerchant = async (
+  merchantId: string,
+  walletId: string,
+  input: { isActive?: boolean; isSelected?: boolean }
+) => {
+  await assertMerchantPlatformAccess(merchantId);
+
+  return withTransaction(async (client) => {
+    const walletResult = await client.query<{
+      id: string;
+      merchant_id: string;
+      asset: string;
+      network: string;
+      payment_id: string | null;
+    }>(
+      `select id, merchant_id, asset, network, payment_id
+       from wallets
+       where id = $1 and merchant_id = $2
+       limit 1`,
+      [walletId, merchantId]
+    );
+    const wallet = walletResult.rows[0];
+    if (!wallet) {
+      throw new AppError(404, "wallet_not_found", "Wallet not found");
+    }
+    if (wallet.payment_id) {
+      throw new AppError(
+        409,
+        "wallet_locked",
+        "Payment-issued routes are immutable. Manage your reusable routes instead."
+      );
+    }
+
+    if (input.isSelected) {
+      await client.query(
+        `update wallets
+         set is_selected = false
+         where merchant_id = $1 and asset = $2 and network = $3 and payment_id is null`,
+        [wallet.merchant_id, wallet.asset, wallet.network]
+      );
+    }
+
+    const result = await client.query(
+      `update wallets
+       set is_active = coalesce($3, is_active),
+           is_selected = coalesce($4, is_selected),
+           last_seen_at = now()
+       where id = $1 and merchant_id = $2
+       returning *`,
+      [walletId, merchantId, input.isActive ?? null, input.isSelected ?? null]
+    );
+
+    return result.rows[0];
+  });
+};
+
+export const deleteWalletForMerchant = async (merchantId: string, walletId: string) => {
+  await assertMerchantPlatformAccess(merchantId);
+
+  return withTransaction(async (client) => {
+    const walletResult = await client.query<{
+      id: string;
+      merchant_id: string;
+      asset: string;
+      network: string;
+      payment_id: string | null;
+      is_selected: boolean;
+    }>(
+      `select id, merchant_id, asset, network, payment_id, is_selected
+       from wallets
+       where id = $1 and merchant_id = $2
+       limit 1`,
+      [walletId, merchantId]
+    );
+    const wallet = walletResult.rows[0];
+    if (!wallet) {
+      throw new AppError(404, "wallet_not_found", "Wallet not found");
+    }
+    if (wallet.payment_id) {
+      throw new AppError(
+        409,
+        "wallet_locked",
+        "Payment-issued routes cannot be removed because they are part of transaction history."
+      );
+    }
+
+    await client.query("delete from wallets where id = $1 and merchant_id = $2", [walletId, merchantId]);
+
+    if (wallet.is_selected) {
+      await client.query(
+        `update wallets
+         set is_selected = true
+         where id = (
+           select id
+           from wallets
+           where merchant_id = $1
+             and asset = $2
+             and network = $3
+             and payment_id is null
+             and is_active = true
+           order by created_at desc
+           limit 1
+         )`,
+        [merchantId, wallet.asset, wallet.network]
+      );
+    }
+
+    return { success: true };
+  });
+};
 
 export const registerNonCustodialWallet = async (
   merchantId: string,
@@ -575,6 +897,7 @@ export const createWalletVerification = async (
   merchantId: string,
   input: { asset: string; network: string; address: string }
 ) => {
+  await assertMerchantCanManageNonCustodialWallets(merchantId);
   const challenge = `cryptopay_verify_${merchantId}_${Date.now()}`;
   const result = await query(
     `insert into non_custodial_wallet_verifications
@@ -633,6 +956,7 @@ export const confirmWalletVerification = async (
   merchantId: string,
   signature: string
 ) => {
+  await assertMerchantCanManageNonCustodialWallets(merchantId);
   const record = await query<{
     id: string;
     wallet_address: string;
@@ -727,6 +1051,36 @@ export const getSubscriptionSummary = async (merchantId: string) => {
     usage: usageResult.rows,
     billing,
     invoices
+  };
+};
+
+export const getMerchantCheckoutSettings = async (merchantId: string) => {
+  await assertMerchantPlatformAccess(merchantId);
+  const checkoutRoutes = await getMerchantCheckoutRoutes(merchantId);
+  return {
+    acceptedRoutes: checkoutRoutes,
+    supportedRoutes: defaultCheckoutRoutes
+  };
+};
+
+export const updateMerchantCheckoutSettings = async (
+  merchantId: string,
+  input: {
+    acceptedRoutes: Array<{
+      asset: SupportedAsset;
+      networks: SupportedNetwork[];
+    }>;
+  }
+) => {
+  await assertMerchantPlatformAccess(merchantId);
+  const acceptedRoutes = normalizeCheckoutRoutes(input.acceptedRoutes);
+  await query(`update merchants set accepted_checkout_routes = $2::jsonb, updated_at = now() where id = $1`, [
+    merchantId,
+    JSON.stringify(acceptedRoutes)
+  ]);
+  return {
+    acceptedRoutes,
+    supportedRoutes: defaultCheckoutRoutes
   };
 };
 

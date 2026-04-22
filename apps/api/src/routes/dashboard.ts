@@ -4,8 +4,11 @@ import { createApiKeyPair } from "../lib/keys.js";
 import { hashValue } from "../lib/security.js";
 import { query } from "../lib/db.js";
 import {
+  deleteWalletForMerchant,
+  createPaymentIntent,
   createWebhookEndpoint,
   fetchPayment,
+  getMerchantCheckoutSettings,
   getSubscriptionSummary,
   listPaymentLedger,
   paymentLedgerBaseQuery,
@@ -15,16 +18,26 @@ import {
   createWalletVerification,
   confirmWalletVerification,
   approveWalletVerification,
+  provisionCustodialWallet,
   registerNonCustodialWallet,
   revokeApiKey,
   revokeWebhookEndpoint,
   rotateApiSecretKey,
   rotateWebhookEndpointSecret,
+  updateMerchantCheckoutSettings,
+  updateWalletForMerchant,
   updateMerchantSubscription
 } from "../lib/services.js";
+import { getMerchantBillingContext } from "../lib/billing.js";
 import { supportedAssets, supportedNetworks } from "@cryptopay/shared";
 
 export const dashboardRouter = Router();
+
+const custodialProvisioningMatrix: Record<string, string[]> = {
+  BTC: ["BTC"],
+  ETH: ["ERC20"],
+  USDT: ["TRC20", "ERC20", "SOL"]
+};
 
 dashboardRouter.use(requireJwt, redisRateLimit("dashboard", 300, 60));
 
@@ -216,9 +229,68 @@ dashboardRouter.get("/subscriptions", async (req, res) => {
   res.json(await getSubscriptionSummary(merchantId));
 });
 
+dashboardRouter.get("/settings", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  res.json(await getMerchantCheckoutSettings(merchantId));
+});
+
+dashboardRouter.patch("/settings", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await updateMerchantCheckoutSettings(merchantId, req.body);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.post("/checkout-preview", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { amountFiat, fiatCurrency, settlementCurrency, network, description } = req.body as {
+    amountFiat: number;
+    fiatCurrency?: string;
+    settlementCurrency: string;
+    network: string;
+    description?: string;
+  };
+
+  const responsePayload = await createPaymentIntent(merchantId, {
+    amountFiat,
+    fiatCurrency: fiatCurrency ?? "INR",
+    settlementCurrency,
+    network,
+    description: description ?? "Merchant checkout preview",
+    successUrl: `${process.env.APP_BASE_URL}/dashboard/settings?preview=success`,
+    cancelUrl: `${process.env.APP_BASE_URL}/dashboard/settings?preview=cancel`,
+    metadata: {
+      preview: "true",
+      source: "merchant_settings"
+    }
+  });
+
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
 dashboardRouter.get("/wallets", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  res.json({ data: await listWallets(merchantId) });
+  const [wallets, billingContext, merchantResult] = await Promise.all([
+    listWallets(merchantId),
+    getMerchantBillingContext(merchantId),
+    query<{ custodial_enabled: boolean }>(`select custodial_enabled from merchants where id = $1 limit 1`, [merchantId])
+  ]);
+  res.json({
+    data: wallets,
+    capabilities: {
+      custodialEnabled: merchantResult.rows[0]?.custodial_enabled ?? true,
+      nonCustodialEnabled: billingContext.plan.nonCustodialEnabled && billingContext.merchantNonCustodialEnabled,
+      planCode: billingContext.planCode,
+      priorityProcessing: billingContext.plan.priorityProcessing
+    },
+    custodialProvisioning: Object.entries(custodialProvisioningMatrix).flatMap(([asset, networks]) =>
+      networks.map((network) => ({
+        asset,
+        network
+      }))
+    )
+  });
 });
 
 dashboardRouter.post("/wallets", async (req, res) => {
@@ -240,6 +312,37 @@ dashboardRouter.post("/wallets", async (req, res) => {
   const responsePayload = await registerNonCustodialWallet(merchantId, { asset, network, address, provider });
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/wallets/custodial", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { asset, network } = req.body as { asset: string; network: string };
+
+  if (!supportedAssets.includes(asset as any) || !supportedNetworks.includes(network as any)) {
+    return res.status(400).json({ message: "Unsupported asset or network" });
+  }
+  if (!(custodialProvisioningMatrix[asset] ?? []).includes(network)) {
+    return res.status(400).json({ message: `Custodial routing is not supported for ${asset} on ${network}` });
+  }
+
+  const responsePayload = await provisionCustodialWallet(merchantId, { asset, network });
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.patch("/wallets/:id", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { isActive, isSelected } = req.body as { isActive?: boolean; isSelected?: boolean };
+  const responsePayload = await updateWalletForMerchant(merchantId, req.params.id, { isActive, isSelected });
+  res.locals.responsePayload = responsePayload;
+  res.json({ data: responsePayload });
+});
+
+dashboardRouter.delete("/wallets/:id", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await deleteWalletForMerchant(merchantId, req.params.id);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
 });
 
 dashboardRouter.post("/wallets/verify", async (req, res) => {

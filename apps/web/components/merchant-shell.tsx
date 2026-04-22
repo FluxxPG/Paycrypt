@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { Activity, Banknote, CreditCard, FileText, KeyRound, ShieldCheck, Wallet } from "lucide-react";
+import { Activity, Banknote, CreditCard, FileText, KeyRound, Settings2, ShieldCheck, Wallet } from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
 
@@ -20,7 +20,8 @@ const navSections = [
     label: "Growth",
     items: [
       { href: "/dashboard/subscriptions", label: "Billing", icon: ShieldCheck },
-      { href: "/dashboard/reports", label: "Reports", icon: FileText }
+      { href: "/dashboard/reports", label: "Reports", icon: FileText },
+      { href: "/dashboard/settings", label: "Settings", icon: Settings2 }
     ]
   },
   {

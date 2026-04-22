@@ -47,7 +47,6 @@ type BillingSnapshot = {
   currency: string;
 };
 
-const nonCustodialNetworks = new Set<SupportedNetwork>(["TRC20", "ERC20", "SOL"]);
 const GST_RATE = 0.18;
 
 const buildInvoiceNumber = () => `inv_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}_${nanoid(8)}`;
@@ -174,13 +173,6 @@ export const assertMerchantCanAcceptPayment = async (
   network: SupportedNetwork
 ) => {
   const context = await assertMerchantPlatformAccess(merchantId);
-  if (nonCustodialNetworks.has(network) && !(context.plan.nonCustodialEnabled && context.merchantNonCustodialEnabled)) {
-    throw new AppError(
-      403,
-      "non_custodial_not_enabled",
-      "Non-custodial wallets require Premium access and super admin approval"
-    );
-  }
 
   const limit = context.transactionLimit;
   if (limit > 0 && context.monthlyTransactions >= limit) {
@@ -196,6 +188,18 @@ export const assertMerchantCanAcceptPayment = async (
     network,
     ...context
   };
+};
+
+export const assertMerchantCanManageNonCustodialWallets = async (merchantId: string) => {
+  const context = await assertMerchantPlatformAccess(merchantId);
+  if (!(context.plan.nonCustodialEnabled && context.merchantNonCustodialEnabled)) {
+    throw new AppError(
+      403,
+      "non_custodial_not_enabled",
+      "Non-custodial wallets stay locked until Premium access and admin approval are active"
+    );
+  }
+  return context;
 };
 
 export const changeSubscriptionPlan = async (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -11,10 +12,12 @@ type Merchant = {
   name: string;
   email: string;
   non_custodial_enabled: boolean;
+  plan_code?: string | null;
 };
 
 type Wallet = {
   id: string;
+  payment_id: string | null;
   wallet_type: string;
   provider: string;
   asset: string;
@@ -22,6 +25,7 @@ type Wallet = {
   address: string;
   is_active: boolean;
   is_selected: boolean;
+  is_manageable?: boolean;
   payment_count: number;
   confirmed_count: number;
 };
@@ -40,61 +44,56 @@ type WalletVerification = {
 
 export const AdminWalletsPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
-  const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
+  const [selectedMerchantId, setSelectedMerchantId] = useState("");
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [verifications, setVerifications] = useState<WalletVerification[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedMerchant = useMemo(
     () => merchants.find((merchant) => merchant.id === selectedMerchantId) ?? null,
     [merchants, selectedMerchantId]
   );
 
+  const loadMerchants = async () => {
+    const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
+    setMerchants(payload.data);
+    setSelectedMerchantId((current) => current || payload.data[0]?.id || "");
+  };
+
+  const loadMerchantWalletState = async (merchantId: string) => {
+    const [walletPayload, verificationPayload] = await Promise.all([
+      apiFetch<{ data: Wallet[] }>(`/admin/merchants/${merchantId}/wallets`),
+      apiFetch<{ data: WalletVerification[] }>(`/admin/wallet-verifications?merchantId=${merchantId}`)
+    ]);
+    setWallets(walletPayload.data);
+    setVerifications(verificationPayload.data);
+  };
+
   useEffect(() => {
-    apiFetch<{ data: Merchant[] }>("/admin/merchants").then((payload) => {
-      setMerchants(payload.data);
-      setSelectedMerchantId((current) => current || payload.data[0]?.id || "");
+    loadMerchants().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load merchants");
     });
   }, []);
 
   useEffect(() => {
     if (!selectedMerchantId) return;
-    apiFetch<{ data: Wallet[] }>(`/admin/merchants/${selectedMerchantId}/wallets`).then((payload) => {
-      setWallets(payload.data);
+    loadMerchantWalletState(selectedMerchantId).catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load wallet state");
     });
-    apiFetch<{ data: WalletVerification[] }>(`/admin/wallet-verifications?merchantId=${selectedMerchantId}`).then(
-      (payload) => {
-        setVerifications(payload.data);
-      }
-    );
   }, [selectedMerchantId]);
 
-  const toggleNonCustodial = async (enabled: boolean) => {
-    if (!selectedMerchant) return;
+  const runAdminAction = async (action: () => Promise<void>) => {
     setBusy(true);
+    setError(null);
     try {
-      await apiFetch(`/admin/merchants/${selectedMerchant.id}/non-custodial`, {
-        method: "POST",
-        body: JSON.stringify({ enabled })
-      });
-      const refresh = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
-      setMerchants(refresh.data);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleWallet = async (walletId: string, patch: { isActive?: boolean; isSelected?: boolean }) => {
-    setBusy(true);
-    try {
-      await apiFetch(`/admin/wallets/${walletId}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch)
-      });
+      await action();
+      await loadMerchants();
       if (selectedMerchantId) {
-        const payload = await apiFetch<{ data: Wallet[] }>(`/admin/merchants/${selectedMerchantId}/wallets`);
-        setWallets(payload.data);
+        await loadMerchantWalletState(selectedMerchantId);
       }
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Wallet action failed");
     } finally {
       setBusy(false);
     }
@@ -102,11 +101,17 @@ export const AdminWalletsPanel = () => {
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <Card className="border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</Card>
+      ) : null}
+
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-medium text-white">Wallet entitlement</h2>
-            <p className="text-sm text-slate-400">Approve non-custodial access per merchant.</p>
+            <h2 className="text-lg font-medium text-white">Merchant entitlement</h2>
+            <p className="text-sm text-slate-400">
+              Activate premium non-custodial capability only for merchants you approve.
+            </p>
           </div>
           <Badge>{selectedMerchant?.name ?? "Select merchant"}</Badge>
         </div>
@@ -124,68 +129,109 @@ export const AdminWalletsPanel = () => {
           </select>
           <Button
             variant="secondary"
-            onClick={() => toggleNonCustodial(!selectedMerchant?.non_custodial_enabled)}
+            onClick={() =>
+              runAdminAction(async () => {
+                if (!selectedMerchant) return;
+                await apiFetch(`/admin/merchants/${selectedMerchant.id}/non-custodial`, {
+                  method: "POST",
+                  body: JSON.stringify({ enabled: !selectedMerchant.non_custodial_enabled })
+                });
+              })
+            }
             disabled={!selectedMerchant || busy}
           >
             {selectedMerchant?.non_custodial_enabled ? "Disable non-custodial" : "Enable non-custodial"}
           </Button>
         </div>
+        {selectedMerchant ? (
+          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
+            <span className="glass-soft rounded-full px-3 py-1">{selectedMerchant.email}</span>
+            <span className="glass-soft rounded-full px-3 py-1">
+              Plan: {selectedMerchant.plan_code ?? "unassigned"}
+            </span>
+            <span className="glass-soft rounded-full px-3 py-1">
+              Non-custodial: {selectedMerchant.non_custodial_enabled ? "enabled" : "disabled"}
+            </span>
+          </div>
+        ) : null}
       </Card>
 
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-medium text-white">Wallet inventory</h2>
-            <p className="text-sm text-slate-400">Enable, disable, and select routes for payout.</p>
+            <p className="text-sm text-slate-400">
+              Review reusable routes, inspect QR output, and set route priority without mixing it up with entitlement.
+            </p>
           </div>
           <Badge>{wallets.length}</Badge>
         </div>
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
           {wallets.map((wallet) => (
-            <div key={wallet.id} className="glass-soft rounded-2xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
+            <div key={wallet.id} className="glass-soft rounded-3xl p-4">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-              <p className="text-white">
-                {wallet.asset} - {wallet.network}
-              </p>
-                  <p className="mt-1 text-xs text-slate-500">{wallet.address}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-                  <span className="glass-soft rounded-full px-3 py-1">{wallet.wallet_type}</span>
-                  <span className="glass-soft rounded-full px-3 py-1">{wallet.provider}</span>
-                  <span className="glass-soft rounded-full px-3 py-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-white">
+                      {wallet.asset} {wallet.network}
+                    </span>
+                    <Badge className="capitalize">{wallet.wallet_type.replace("_", " ")}</Badge>
+                    <Badge className="border-white/10 bg-white/5 text-slate-200">{wallet.provider}</Badge>
+                    {wallet.is_selected ? <Badge>Primary</Badge> : null}
+                  </div>
+                  <p className="mt-2 break-all text-xs text-slate-400">{wallet.address}</p>
+                  <p className="mt-2 text-xs text-slate-500">
                     {wallet.confirmed_count}/{wallet.payment_count} confirmed
-                  </span>
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => toggleWallet(wallet.id, { isActive: !wallet.is_active })}
-                    disabled={busy}
-                  >
-                    {wallet.is_active ? "Disable" : "Enable"}
-                  </Button>
-                  <Button
-                    onClick={() => toggleWallet(wallet.id, { isSelected: true })}
-                    disabled={busy || wallet.is_selected}
-                  >
-                    {wallet.is_selected ? "Selected" : "Set Primary"}
-                  </Button>
+                <div className="rounded-2xl border border-white/8 bg-slate-950/50 p-2">
+                  <QRCodeSVG value={wallet.address} size={84} bgColor="transparent" fgColor="#ffffff" />
                 </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    runAdminAction(async () => {
+                      await apiFetch(`/admin/wallets/${wallet.id}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ isActive: !wallet.is_active })
+                      });
+                    })
+                  }
+                  disabled={busy}
+                >
+                  {wallet.is_active ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  onClick={() =>
+                    runAdminAction(async () => {
+                      await apiFetch(`/admin/wallets/${wallet.id}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ isSelected: true })
+                      });
+                    })
+                  }
+                  disabled={busy || wallet.is_selected}
+                >
+                  {wallet.is_selected ? "Primary" : "Set primary"}
+                </Button>
               </div>
             </div>
           ))}
-          {wallets.length === 0 ? (
-            <p className="text-sm text-slate-400">No wallets yet. Create a payment to generate wallet routes.</p>
-          ) : null}
         </div>
+        {wallets.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-400">No reusable routes provisioned yet for this merchant.</p>
+        ) : null}
       </Card>
 
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-medium text-white">Wallet verification queue</h2>
-            <p className="text-sm text-slate-400">Approve verified non-custodial wallets.</p>
+            <p className="text-sm text-slate-400">
+              Approve verified wallet ownership only after the merchant has premium entitlement enabled.
+            </p>
           </div>
           <Badge>{verifications.length}</Badge>
         </div>
@@ -194,9 +240,9 @@ export const AdminWalletsPanel = () => {
             <div key={entry.id} className="glass-soft rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-              <p className="text-white">
-                {entry.asset} - {entry.network}
-              </p>
+                  <p className="text-white">
+                    {entry.asset} {entry.network}
+                  </p>
                   <p className="mt-1 text-xs text-slate-500">{entry.wallet_address}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
@@ -207,39 +253,29 @@ export const AdminWalletsPanel = () => {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
-                    onClick={async () => {
-                      if (entry.status !== "verified") {
-                        return;
-                      }
-                      await apiFetch(`/admin/wallet-verifications/${entry.id}/approve`, {
-                        method: "POST",
-                        body: JSON.stringify({ merchantId: entry.merchant_id })
-                      });
-                      await apiFetch("/admin/merchants/" + entry.merchant_id + "/non-custodial", {
-                        method: "POST",
-                        body: JSON.stringify({ enabled: true })
-                      });
-                      const payload = await apiFetch<{ data: WalletVerification[] }>(
-                        `/admin/wallet-verifications?merchantId=${entry.merchant_id}`
-                      );
-                      setVerifications(payload.data);
-                      const walletsPayload = await apiFetch<{ data: Wallet[] }>(
-                        `/admin/merchants/${entry.merchant_id}/wallets`
-                      );
-                      setWallets(walletsPayload.data);
-                    }}
+                    onClick={() =>
+                      runAdminAction(async () => {
+                        await apiFetch(`/admin/wallet-verifications/${entry.id}/approve`, {
+                          method: "POST",
+                          body: JSON.stringify({ merchantId: entry.merchant_id })
+                        });
+                      })
+                    }
+                    disabled={busy || entry.status !== "verified" || !selectedMerchant?.non_custodial_enabled}
                   >
-                    Approve
+                    Approve wallet
                   </Button>
                 </div>
               </div>
               <p className="mt-2 text-xs text-slate-500">Challenge: {entry.challenge_message}</p>
-              <p className="mt-1 text-xs text-slate-500">Status: {entry.status}</p>
+              {!selectedMerchant?.non_custodial_enabled ? (
+                <p className="mt-2 text-xs text-amber-200">
+                  Enable non-custodial access first. Approval alone no longer flips the merchant entitlement.
+                </p>
+              ) : null}
             </div>
           ))}
-          {verifications.length === 0 ? (
-            <p className="text-sm text-slate-400">No pending verifications.</p>
-          ) : null}
+          {verifications.length === 0 ? <p className="text-sm text-slate-400">No pending verifications.</p> : null}
         </div>
       </Card>
     </div>
