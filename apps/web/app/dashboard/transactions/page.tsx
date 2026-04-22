@@ -1,13 +1,5 @@
-import { MerchantShell } from "../../../components/merchant-shell";
-import { TransactionsPanel } from "../../../components/transactions-panel";
+import { redirect } from "next/navigation";
 
 export default function TransactionsPage() {
-  return (
-    <MerchantShell
-      title="Transactions"
-      subtitle="On-chain confirmations and hashes for every payment."
-    >
-      <TransactionsPanel />
-    </MerchantShell>
-  );
+  redirect("/dashboard/payments");
 }

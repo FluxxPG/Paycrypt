@@ -5,7 +5,7 @@ export default function PaymentsPage() {
   return (
     <MerchantShell
       title="Payments"
-      subtitle="Track intent creation, chain settlement, confirmations, and customer checkout state."
+      subtitle="Work from one canonical ledger with payment state, settlement state, wallet source, and on-chain details together."
     >
       <DashboardPaymentsPanel />
     </MerchantShell>

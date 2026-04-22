@@ -280,6 +280,16 @@ The active frontend deployment is:
 - Merchant: `owner@nebula.dev` / `ChangeMe123!`
 - Admin: `admin@cryptopay.dev` / `AdminChangeMe123!`
 
+
+## Binance testing reality
+
+Binance Spot Testnet exists, but according to the official Binance documentation it only supports `/api` Spot endpoints and does not expose `/sapi` wallet and capital endpoints. Paycrypt's custodial wallet flow uses Binance wallet SAPI endpoints such as deposit address lookup and deposit history, so real Binance API credentials are required for end-to-end custodial testing.
+
+What this means in practice:
+
+- The platform is live and working without Binance credentials for dashboards, auth, hosted checkout UI, Supabase, Redis, workers, admin controls, and non-custodial chain monitoring paths.
+- Custodial Binance wallet issuance and Binance deposit monitoring are code-complete but not activated until `BINANCE_API_KEY` and `BINANCE_API_SECRET` are set.
+- Spot Testnet can still be useful for separate trading-only experiments, but it is not a substitute for wallet SAPI validation in this codebase.
 ## Environment model
 
 Use the shared pooler on IPv4-only environments.

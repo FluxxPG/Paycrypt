@@ -1,13 +1,5 @@
-import { MerchantShell } from "../../../components/merchant-shell";
-import { SettlementsPanel } from "../../../components/settlements-panel";
+import { redirect } from "next/navigation";
 
 export default function SettlementsPage() {
-  return (
-    <MerchantShell
-      title="Settlements"
-      subtitle="Track finalized crypto settlements with provider, hash, and payment reconciliation details."
-    >
-      <SettlementsPanel />
-    </MerchantShell>
-  );
+  redirect("/dashboard/payments");
 }

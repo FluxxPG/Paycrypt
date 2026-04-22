@@ -3,7 +3,7 @@ import dns from "node:dns";
 import { Queue, QueueEvents, Worker } from "bullmq";
 import Redis from "ioredis";
 import { Pool } from "pg";
-import { observePayment } from "./providers.js";
+import { observePayment, requiredConfirmations } from "./providers.js";
 import { recordWorkerMetric } from "./telemetry.js";
 
 config();
@@ -209,10 +209,11 @@ const loadPayment = async (paymentId: string) => {
     amount_fiat: string;
     amount_crypto: string;
     expires_at: string;
+    created_at: string;
   }>(
     `select
       id, merchant_id, settlement_currency, network, wallet_address, wallet_routes, status,
-      confirmations, tx_hash, amount_fiat, amount_crypto, expires_at
+      confirmations, tx_hash, amount_fiat, amount_crypto, expires_at, created_at
      from payments where id = $1 limit 1`,
     [paymentId]
   );
@@ -348,6 +349,10 @@ const reconcilePayment = async (paymentId: string) => {
     throw new Error("No on-chain or custodial settlement detected yet");
   }
 
+  if (payment.tx_hash && payment.tx_hash !== observation.txHash) {
+    throw new Error("Observed transaction hash does not match the recorded payment transaction");
+  }
+
   await upsertTransaction(payment, observation.txHash, observation.confirmations, observation.status);
   await updatePaymentStatus(
     payment.id,
@@ -453,6 +458,25 @@ const handleSettlementJob = async (payload: { paymentId: string; merchantId: str
       throw new Error("Missing transaction hash for settlement");
     }
 
+    const payment = await loadPayment(payload.paymentId);
+    if (!payment) {
+      throw new Error("Payment not found for provider reconciliation");
+    }
+
+    const observation = await observePayment(payment);
+    if (!observation) {
+      throw new Error("Provider reconciliation could not verify settlement yet");
+    }
+    if (observation.status !== "confirmed") {
+      throw new Error("Provider reconciliation has not confirmed the transaction yet");
+    }
+    if (observation.txHash !== settlement.tx_hash) {
+      throw new Error("Provider reconciliation returned a different transaction hash");
+    }
+    if (observation.confirmations < (requiredConfirmations[payment.network] ?? 1)) {
+      throw new Error("Provider reconciliation did not meet confirmation threshold");
+    }
+
     await db.query(
       `insert into settlements (
         merchant_id,
@@ -492,10 +516,10 @@ const handleSettlementJob = async (payload: { paymentId: string; merchantId: str
         settlement.network,
         settlement.amount_crypto,
         settlement.amount_fiat,
-        settlement.tx_hash,
+        observation.txHash,
         JSON.stringify({
-          confirmations: settlement.confirmations,
-          source: "auto_settlement"
+          confirmations: observation.confirmations,
+          source: "verified_provider_observation"
         })
       ]
     );

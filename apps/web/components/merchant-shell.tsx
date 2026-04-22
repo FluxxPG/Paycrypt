@@ -3,16 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import {
-  Activity,
-  Banknote,
-  CreditCard,
-  FileText,
-  KeyRound,
-  ReceiptText,
-  ShieldCheck,
-  Wallet
-} from "lucide-react";
+import { Activity, Banknote, CreditCard, FileText, KeyRound, ShieldCheck, Wallet } from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
 
@@ -22,8 +13,6 @@ const navSections = [
     items: [
       { href: "/dashboard", label: "Overview", icon: Activity },
       { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
-      { href: "/dashboard/transactions", label: "Transactions", icon: Banknote },
-      { href: "/dashboard/settlements", label: "Settlements", icon: ReceiptText },
       { href: "/dashboard/wallets", label: "Wallets", icon: Wallet }
     ]
   },
@@ -98,7 +87,7 @@ export const MerchantShell = ({
           </div>
           <div className="mt-auto space-y-4">
             <Badge className="w-fit">Live environment</Badge>
-            <p className="text-xs text-slate-500">Realtime settlement + wallet monitoring active.</p>
+            <p className="text-xs text-slate-500">Unified payment ledger and wallet monitoring active.</p>
           </div>
         </aside>
 

@@ -9,12 +9,54 @@ type PaymentRow = {
   wallet_routes: Record<string, { asset: string; network: string; address: string; provider?: string; walletType?: string }>;
   status: string;
   amount_crypto?: string;
+  created_at: string;
+  tx_hash?: string | null;
 };
 
 type ProviderObservation = {
   txHash: string;
   confirmations: number;
   status: "pending" | "confirmed";
+};
+
+type EthereumLog = {
+  transactionHash: string;
+  blockNumber: string;
+  data: string;
+};
+
+type EthereumBlock = {
+  number: string;
+  timestamp: string;
+  transactions: Array<{
+    hash: string;
+    to?: string | null;
+    value: string;
+  }>;
+};
+
+type SolanaTransaction = {
+  blockTime?: number | null;
+  meta?: {
+    innerInstructions?: Array<{
+      instructions?: Array<{
+        parsed?: {
+          type?: string;
+          info?: Record<string, unknown>;
+        };
+      }>;
+    }>;
+  };
+  transaction?: {
+    message?: {
+      instructions?: Array<{
+        parsed?: {
+          type?: string;
+          info?: Record<string, unknown>;
+        };
+      }>;
+    };
+  };
 };
 
 const binanceBaseUrl = process.env.BINANCE_BASE_URL ?? "https://api.binance.com";
@@ -24,11 +66,21 @@ const solanaRpcUrl = process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.sol
 
 const erc20UsdtContract = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a6fca4d6b3";
-const confirmationThresholds: Record<string, number> = {
+const paymentTimeDriftMs = 30 * 60 * 1000;
+const nativeEthToleranceWei = 1_000_000_000_000n;
+
+export const requiredConfirmations: Record<string, number> = {
   BTC: 2,
   ERC20: 12,
   TRC20: 20,
   SOL: 32
+};
+
+const networkMap: Record<string, string> = {
+  BTC: "BTC",
+  ERC20: "ETH",
+  TRC20: "TRX",
+  SOL: "SOL"
 };
 
 const jsonRpc = async <T>(url: string, method: string, params: unknown[] = []) => {
@@ -52,26 +104,96 @@ const jsonRpc = async <T>(url: string, method: string, params: unknown[] = []) =
   return payload.result as T;
 };
 
-const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
-  if (payment.settlement_currency === "ETH") {
-    const balanceHex = await jsonRpc<string>(ethereumRpcUrl, "eth_getBalance", [payment.wallet_address, "latest"]);
-    const balance = Number(BigInt(balanceHex)) / 1e18;
-    const expected = Number(payment.amount_crypto ?? 0);
-    if (balance >= expected && expected > 0) {
+const normalizeNumber = (value: string | number | undefined | null) => Number(value ?? 0);
+
+const normalizeNetwork = (value: string | undefined | null) => {
+  const normalized = String(value ?? "").toUpperCase();
+  if (normalized === "ETH") return "ERC20";
+  if (normalized === "TRX") return "TRC20";
+  return normalized;
+};
+
+const paymentCreatedAt = (payment: PaymentRow) => new Date(payment.created_at).getTime();
+
+const isWithinPaymentWindow = (candidateTimeMs: number | undefined | null, payment: PaymentRow) => {
+  if (!candidateTimeMs) return true;
+  return candidateTimeMs >= paymentCreatedAt(payment) - paymentTimeDriftMs;
+};
+
+const parseDecimalToUnits = (value: string | number | undefined, decimals: number) => {
+  const normalized = String(value ?? "0").trim();
+  const negative = normalized.startsWith("-");
+  const [whole, fraction = ""] = normalized.replace("-", "").split(".");
+  const padded = `${whole || "0"}${fraction.padEnd(decimals, "0").slice(0, decimals)}`;
+  const units = BigInt(padded || "0");
+  return negative ? -units : units;
+};
+
+const amountMatchesUnits = (actual: bigint, expected: bigint, tolerance: bigint) => {
+  const diff = actual > expected ? actual - expected : expected - actual;
+  return diff <= tolerance;
+};
+
+const amountMatches = (
+  actual: string | number | undefined,
+  expected: string | number | undefined,
+  decimals: number,
+  toleranceUnits: bigint
+) => amountMatchesUnits(parseDecimalToUnits(actual, decimals), parseDecimalToUnits(expected, decimals), toleranceUnits);
+
+const toHex = (value: bigint) => `0x${value.toString(16)}`;
+
+const confirmationsFor = (network: string, currentBlock: bigint, targetBlock: bigint) => {
+  const confirmations = Number(currentBlock - targetBlock + 1n);
+  return confirmations > 0 ? confirmations : 0;
+};
+
+const blockTimestampMs = (hexTimestamp: string) => Number(BigInt(hexTimestamp)) * 1000;
+
+const findEthereumTransfer = async (
+  payment: PaymentRow,
+  latestBlock: bigint,
+  expectedWei: bigint
+): Promise<ProviderObservation | null> => {
+  const maxBlocksToScan = 160n;
+
+  for (let offset = 0n; offset < maxBlocksToScan && latestBlock > offset; offset += 1n) {
+    const blockNumber = latestBlock - offset;
+    const block = await jsonRpc<EthereumBlock>(ethereumRpcUrl, "eth_getBlockByNumber", [toHex(blockNumber), true]);
+    if (!isWithinPaymentWindow(blockTimestampMs(block.timestamp), payment)) {
+      break;
+    }
+
+    const tx = block.transactions.find((item) => {
+      if (!item.to) return false;
+      if (item.to.toLowerCase() !== payment.wallet_address.toLowerCase()) return false;
+      return amountMatchesUnits(BigInt(item.value), expectedWei, nativeEthToleranceWei);
+    });
+
+    if (tx) {
+      const confirmations = confirmationsFor(payment.network, latestBlock, blockNumber);
       return {
-        txHash: "native",
-        confirmations: confirmationThresholds.ERC20,
-        status: "confirmed"
+        txHash: tx.hash,
+        confirmations,
+        status: confirmations >= requiredConfirmations.ERC20 ? "confirmed" : "pending"
       };
     }
-    return null;
+  }
+
+  return null;
+};
+
+const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
+  const latestBlockHex = await jsonRpc<string>(ethereumRpcUrl, "eth_blockNumber");
+  const latestBlock = BigInt(latestBlockHex);
+
+  if (payment.settlement_currency === "ETH") {
+    return findEthereumTransfer(payment, latestBlock, parseDecimalToUnits(payment.amount_crypto, 18));
   }
 
   const topicAddress = `0x${payment.wallet_address.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
-  const latestBlockHex = await jsonRpc<string>(ethereumRpcUrl, "eth_blockNumber");
-  const latestBlock = BigInt(latestBlockHex);
-  const fromBlock = `0x${(latestBlock > 5000n ? latestBlock - 5000n : 0n).toString(16)}`;
-  const logs = await jsonRpc<Array<{ transactionHash: string; blockNumber: string }>>(ethereumRpcUrl, "eth_getLogs", [
+  const fromBlock = latestBlock > 30_000n ? toHex(latestBlock - 30_000n) : "0x0";
+  const logs = await jsonRpc<EthereumLog[]>(ethereumRpcUrl, "eth_getLogs", [
     {
       fromBlock,
       toBlock: "latest",
@@ -79,43 +201,89 @@ const monitorEthereum = async (payment: PaymentRow): Promise<ProviderObservation
       topics: [transferTopic, null, topicAddress]
     }
   ]);
-  const latestLog = logs.at(-1);
-  if (!latestLog) {
-    return null;
+  const expectedAmount = parseDecimalToUnits(payment.amount_crypto, 6);
+
+  for (const log of logs.slice().reverse()) {
+    const block = await jsonRpc<EthereumBlock>(ethereumRpcUrl, "eth_getBlockByNumber", [log.blockNumber, false]);
+    if (!isWithinPaymentWindow(blockTimestampMs(block.timestamp), payment)) {
+      continue;
+    }
+
+    const amount = BigInt(log.data);
+    if (!amountMatchesUnits(amount, expectedAmount, 5_000n)) {
+      continue;
+    }
+
+    const targetBlock = BigInt(log.blockNumber);
+    const confirmations = confirmationsFor(payment.network, latestBlock, targetBlock);
+    return {
+      txHash: log.transactionHash,
+      confirmations,
+      status: confirmations >= requiredConfirmations.ERC20 ? "confirmed" : "pending"
+    };
   }
 
-  const blockNumber = BigInt(latestLog.blockNumber);
-  const confirmations = Number(latestBlock - blockNumber + 1n);
-
-  return {
-    txHash: latestLog.transactionHash,
-    confirmations,
-    status: confirmations >= confirmationThresholds.ERC20 ? "confirmed" : "pending"
-  };
+  return null;
 };
 
 const monitorSolana = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
   const signatures = await jsonRpc<
     Array<{ signature: string; confirmations: number | null; confirmationStatus?: "processed" | "confirmed" | "finalized" }>
-  >(solanaRpcUrl, "getSignaturesForAddress", [payment.wallet_address, { limit: 20 }]);
-  const signature = signatures[0];
-  if (!signature) return null;
+  >(solanaRpcUrl, "getSignaturesForAddress", [payment.wallet_address, { limit: 15 }]);
 
-  const statuses = await jsonRpc<{
-    value: Array<{ confirmations: number | null; confirmationStatus?: "processed" | "confirmed" | "finalized" } | null>;
-  }>(solanaRpcUrl, "getSignatureStatuses", [[signature.signature], { searchTransactionHistory: true }]);
-  const status = statuses.value[0] ?? null;
-  const confirmations = status?.confirmations ?? signature.confirmations ?? 0;
-  const confirmationStatus = status?.confirmationStatus ?? signature.confirmationStatus;
+  for (const signature of signatures) {
+    const transaction = await jsonRpc<SolanaTransaction | null>(solanaRpcUrl, "getTransaction", [
+      signature.signature,
+      { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }
+    ]);
+    const blockTimeMs = transaction?.blockTime ? transaction.blockTime * 1000 : undefined;
+    if (!isWithinPaymentWindow(blockTimeMs, payment)) {
+      continue;
+    }
 
-  return {
-    txHash: signature.signature,
-    confirmations,
-    status:
-      confirmationStatus === "finalized" || confirmations >= confirmationThresholds.SOL
-        ? "confirmed"
-        : "pending"
-  };
+    const parsedInstructions = [
+      ...(transaction?.transaction?.message?.instructions ?? []),
+      ...(
+        transaction?.meta?.innerInstructions?.flatMap((group) => group.instructions ?? []) ?? []
+      )
+    ];
+
+    const match = parsedInstructions.find((instruction) => {
+      const parsed = instruction.parsed;
+      const info = parsed?.info ?? {};
+      const destination = String(info.destination ?? "");
+      if (destination !== payment.wallet_address) {
+        return false;
+      }
+
+      if (payment.settlement_currency === "SOL") {
+        const lamports = BigInt(String(info.lamports ?? "0"));
+        return amountMatchesUnits(lamports, parseDecimalToUnits(payment.amount_crypto, 9), 5_000n);
+      }
+
+      const amount =
+        info.tokenAmount && typeof info.tokenAmount === "object"
+          ? String((info.tokenAmount as Record<string, unknown>).amount ?? "0")
+          : String(info.amount ?? "0");
+      return amountMatchesUnits(BigInt(amount), parseDecimalToUnits(payment.amount_crypto, 6), 5_000n);
+    });
+
+    if (!match) {
+      continue;
+    }
+
+    const confirmations = signature.confirmations ?? 0;
+    return {
+      txHash: signature.signature,
+      confirmations,
+      status:
+        signature.confirmationStatus === "finalized" || confirmations >= requiredConfirmations.SOL
+          ? "confirmed"
+          : "pending"
+    };
+  }
+
+  return null;
 };
 
 const monitorTron = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
@@ -127,15 +295,30 @@ const monitorTron = async (payment: PaymentRow): Promise<ProviderObservation | n
   }
 
   const payload = (await response.json()) as {
-    data?: Array<{ transaction_id: string; confirmed?: boolean; value?: string; token_info?: { symbol?: string } }>;
+    data?: Array<{
+      transaction_id: string;
+      confirmed?: boolean;
+      value?: string;
+      to?: string;
+      block_timestamp?: number;
+      token_info?: { symbol?: string; decimals?: number | string };
+    }>;
   };
-  const tx = payload.data?.find((item) => item.token_info?.symbol === payment.settlement_currency) ?? payload.data?.[0];
+
+  const tx = payload.data?.find((item) => {
+    const assetMatches = String(item.token_info?.symbol ?? "").toUpperCase() === payment.settlement_currency;
+    const destinationMatches = item.to ? item.to === payment.wallet_address : true;
+    const decimals = Number(item.token_info?.decimals ?? 6);
+    const amountMatchesExpected = amountMatches(item.value ?? "0", payment.amount_crypto, decimals, 5_000n);
+    return assetMatches && destinationMatches && amountMatchesExpected && isWithinPaymentWindow(item.block_timestamp, payment);
+  });
+
   if (!tx) return null;
 
   return {
     txHash: tx.transaction_id,
-    confirmations: tx.confirmed === false ? 0 : confirmationThresholds.TRC20,
-    status: tx.confirmed === false ? "pending" : "confirmed"
+    confirmations: tx.confirmed ? requiredConfirmations.TRC20 : 0,
+    status: tx.confirmed ? "confirmed" : "pending"
   };
 };
 
@@ -148,6 +331,8 @@ const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation 
 
   const timestamp = Date.now();
   const query = new URLSearchParams({
+    coin: payment.settlement_currency,
+    startTime: String(Math.max(paymentCreatedAt(payment) - paymentTimeDriftMs, 0)),
     timestamp: String(timestamp)
   });
   const hash = crypto.createHmac("sha256", apiSecret).update(query.toString()).digest("hex");
@@ -166,20 +351,39 @@ const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation 
     coin?: string;
     address?: string;
     amount?: string;
+    network?: string;
+    insertTime?: number;
   }>;
-  const match = deposits.find(
-    (item) =>
-      String(item.coin ?? "") === payment.settlement_currency &&
-      String(item.address ?? "") === payment.wallet_address
-  );
+
+  const match = deposits.find((item) => {
+    const coinMatches = String(item.coin ?? "").toUpperCase() === payment.settlement_currency;
+    const addressMatches = String(item.address ?? "") === payment.wallet_address;
+    const amountMatchesExpected = amountMatches(item.amount, payment.amount_crypto, 8, 10_000n);
+    const networkMatches =
+      !item.network || normalizeNetwork(item.network) === normalizeNetwork(payment.network);
+    const timeMatches = isWithinPaymentWindow(item.insertTime, payment);
+    return coinMatches && addressMatches && amountMatchesExpected && networkMatches && timeMatches;
+  });
+
   if (!match?.txId) return null;
 
-  const confirmed = match.status === 1 || match.status === 6 || match.status === undefined;
-  return {
-    txHash: match.txId,
-    confirmations: confirmed ? confirmationThresholds.BTC : 0,
-    status: confirmed ? "confirmed" : "pending"
-  };
+  if (match.status === 1) {
+    return {
+      txHash: match.txId,
+      confirmations: requiredConfirmations[payment.network] ?? requiredConfirmations.BTC,
+      status: "confirmed"
+    };
+  }
+
+  if (match.status === 0 || match.status === 6) {
+    return {
+      txHash: match.txId,
+      confirmations: 0,
+      status: "pending"
+    };
+  }
+
+  return null;
 };
 
 export const observePayment = async (payment: PaymentRow): Promise<ProviderObservation | null> => {

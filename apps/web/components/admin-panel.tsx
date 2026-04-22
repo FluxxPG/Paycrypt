@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, FileText, Gauge, ShieldCheck, Webhook } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FileText, Gauge, Webhook } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { apiFetch } from "../lib/authed-fetch";
@@ -16,6 +16,11 @@ type Merchant = {
   non_custodial_enabled: boolean;
   plan_code: string | null;
   subscription_status: string | null;
+  total_payments: number;
+  settled_payments: number;
+  unsettled_payments: number;
+  failed_payments: number;
+  last_payment_at: string | null;
 };
 
 type QueueCounts = {
@@ -29,6 +34,17 @@ type QueueCounts = {
 type Analytics = {
   merchants: number;
   payments: Array<{ status: string; count: number; volume: number | string }>;
+  ledger: {
+    total: number;
+    settled: number;
+    unsettled: number;
+    failed: number;
+    custodial: number;
+    non_custodial: number;
+    settled_volume: number | string;
+    unsettled_volume: number | string;
+  };
+  walletSources: Array<{ wallet_type: string; wallet_provider: string; count: number }>;
   revenue: Array<{ plan_code: string; merchants: number; mrr: number | string }>;
   monitoring: {
     queues: {
@@ -91,6 +107,7 @@ const formatTime = (value: string) =>
 export const AdminPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[] | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+
   useEffect(() => {
     let mounted = true;
     Promise.all([apiFetch<{ data: Merchant[] }>("/admin/merchants"), apiFetch<Analytics>("/admin/analytics")]).then(
@@ -139,11 +156,6 @@ export const AdminPanel = () => {
     ? Math.round((requestErrors / telemetry.httpRequestsTotal) * 100)
     : 0;
 
-  const paymentStats = analytics.payments.reduce<Record<string, { count: number; volume: number }>>((acc, item) => {
-    acc[item.status] = { count: Number(item.count), volume: Number(item.volume) };
-    return acc;
-  }, {});
-
   return (
     <div className="space-y-6">
       <Card>
@@ -155,16 +167,16 @@ export const AdminPanel = () => {
           <Badge>Super Admin</Badge>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            {[
-              { label: "Merchants", href: "/admin/merchants" },
-              { label: "Subscriptions", href: "/admin/subscriptions" },
-              { label: "Wallets", href: "/admin/wallets" },
-              { label: "Custody", href: "/admin/custody" },
-              { label: "API Keys", href: "/admin/api-keys" },
-              { label: "Webhooks", href: "/admin/webhooks" },
-              { label: "Revenue", href: "/admin/revenue" },
-              { label: "Risk & Alerts", href: "/admin/risk" }
-            ].map((item) => (
+          {[
+            { label: "Merchants", href: "/admin/merchants" },
+            { label: "Subscriptions", href: "/admin/subscriptions" },
+            { label: "Wallets", href: "/admin/wallets" },
+            { label: "Custody", href: "/admin/custody" },
+            { label: "API Keys", href: "/admin/api-keys" },
+            { label: "Webhooks", href: "/admin/webhooks" },
+            { label: "Revenue", href: "/admin/revenue" },
+            { label: "Risk & Alerts", href: "/admin/risk" }
+          ].map((item) => (
             <a
               key={item.label}
               href={item.href}
@@ -175,26 +187,27 @@ export const AdminPanel = () => {
           ))}
         </div>
       </Card>
+
       <div id="overview" className="grid gap-6 lg:grid-cols-4">
         <Card>
           <p className="text-sm text-slate-400">Merchants</p>
           <p className="mt-4 text-3xl font-semibold text-white">{analytics.merchants}</p>
         </Card>
         <Card>
-          <p className="text-sm text-slate-400">Confirmed payments</p>
-          <p className="mt-4 text-3xl font-semibold text-white">{paymentStats.confirmed?.count ?? 0}</p>
+          <p className="text-sm text-slate-400">Settled payments</p>
+          <p className="mt-4 text-3xl font-semibold text-white">{analytics.ledger.settled}</p>
+        </Card>
+        <Card>
+          <p className="text-sm text-slate-400">Unsettled payments</p>
+          <p className="mt-4 text-3xl font-semibold text-white">{analytics.ledger.unsettled}</p>
         </Card>
         <Card>
           <p className="text-sm text-slate-400">Queue backlog</p>
           <p className="mt-4 text-3xl font-semibold text-white">{queueBacklog}</p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Webhook success</p>
-          <p className="mt-4 text-3xl font-semibold text-white">{webhookSuccessRate}%</p>
-        </Card>
       </div>
 
-      <div id="revenue" className="grid gap-6">
+      <div id="revenue" className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium text-white">Revenue mix</h2>
@@ -211,6 +224,33 @@ export const AdminPanel = () => {
                     </p>
                   </div>
                   <Gauge className="h-4 w-4 text-cyan-300" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium text-white">Wallet source mix</h2>
+              <p className="text-sm text-slate-400">Payment receipts grouped by custody model and provider.</p>
+            </div>
+            <Badge>{analytics.walletSources.length} routes</Badge>
+          </div>
+          <div className="mt-4 space-y-3">
+            {analytics.walletSources.map((item) => (
+              <div key={`${item.wallet_type}-${item.wallet_provider}`} className="glass-soft rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-white capitalize">
+                      {item.wallet_type.replace("_", " ")} · {item.wallet_provider}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">{item.count} payment routes</p>
+                  </div>
+                  <Badge className={item.wallet_type === "non_custodial" ? "border-violet-400/20 bg-violet-400/10 text-violet-200" : "border-sky-400/20 bg-sky-400/10 text-sky-200"}>
+                    {item.count}
+                  </Badge>
                 </div>
               </div>
             ))}
@@ -257,20 +297,26 @@ export const AdminPanel = () => {
               <p className="mt-2 text-2xl font-semibold text-white">{queueBacklog}</p>
             </div>
           </div>
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
             <div className="glass-soft rounded-2xl p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Settlements</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{analytics.monitoring.settlementSummary.total}</p>
-            </div>
-            <div className="glass-soft rounded-2xl p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Processed</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{analytics.monitoring.settlementSummary.processed}</p>
-            </div>
-            <div className="glass-soft rounded-2xl p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Volume</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Settled volume</p>
               <p className="mt-2 text-2xl font-semibold text-white">
-                INR {Number(analytics.monitoring.settlementSummary.volume).toLocaleString("en-IN")}
+                INR {Number(analytics.ledger.settled_volume).toLocaleString("en-IN")}
               </p>
+            </div>
+            <div className="glass-soft rounded-2xl p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Unsettled volume</p>
+              <p className="mt-2 text-2xl font-semibold text-white">
+                INR {Number(analytics.ledger.unsettled_volume).toLocaleString("en-IN")}
+              </p>
+            </div>
+            <div className="glass-soft rounded-2xl p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Custodial routes</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{analytics.ledger.custodial}</p>
+            </div>
+            <div className="glass-soft rounded-2xl p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Non-custodial routes</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{analytics.ledger.non_custodial}</p>
             </div>
           </div>
         </Card>
@@ -304,6 +350,13 @@ export const AdminPanel = () => {
                 <Webhook className="h-4 w-4 text-cyan-300" />
               </div>
               <p className="mt-2 text-2xl font-semibold text-white">{analytics.monitoring.webhookSummary.total}</p>
+            </div>
+            <div className="glass-soft rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span>Needs attention</span>
+                <AlertTriangle className="h-4 w-4 text-amber-300" />
+              </div>
+              <p className="mt-2 text-2xl font-semibold text-white">{analytics.ledger.failed}</p>
             </div>
           </div>
         </Card>

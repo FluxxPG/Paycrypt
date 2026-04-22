@@ -17,7 +17,22 @@ type Merchant = {
   non_custodial_enabled: boolean;
   plan_code: string | null;
   subscription_status: string | null;
+  total_payments: number;
+  settled_payments: number;
+  unsettled_payments: number;
+  failed_payments: number;
+  last_payment_at: string | null;
 };
+
+const formatTime = (value: string | null) =>
+  value
+    ? new Date(value).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
+      })
+    : "No payment yet";
 
 export const AdminMerchantsPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
@@ -162,7 +177,7 @@ export const AdminMerchantsPanel = () => {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-medium text-white">Update merchant</h2>
-              <p className="text-sm text-slate-400">Edit merchant profile details or disable access.</p>
+              <p className="text-sm text-slate-400">Edit merchant profile details and monitor their payment ledger posture.</p>
             </div>
             <Badge>{selectedMerchant?.name ?? "Select merchant"}</Badge>
           </div>
@@ -198,15 +213,38 @@ export const AdminMerchantsPanel = () => {
             </Button>
           </div>
           {selectedMerchant ? (
-            <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
-              <div className="glass-soft rounded-2xl p-4">Status: {selectedMerchant.status}</div>
-              <div className="glass-soft rounded-2xl p-4">
-                Custodial: {selectedMerchant.custodial_enabled ? "enabled" : "disabled"}
+            <>
+              <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+                <div className="glass-soft rounded-2xl p-4">Status: {selectedMerchant.status}</div>
+                <div className="glass-soft rounded-2xl p-4">
+                  Custodial: {selectedMerchant.custodial_enabled ? "enabled" : "disabled"}
+                </div>
+                <div className="glass-soft rounded-2xl p-4">
+                  Non-custodial: {selectedMerchant.non_custodial_enabled ? "enabled" : "disabled"}
+                </div>
               </div>
-              <div className="glass-soft rounded-2xl p-4">
-                Non-custodial: {selectedMerchant.non_custodial_enabled ? "enabled" : "disabled"}
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="glass-soft rounded-2xl p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Payments</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{selectedMerchant.total_payments}</p>
+                </div>
+                <div className="glass-soft rounded-2xl p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Settled</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{selectedMerchant.settled_payments}</p>
+                </div>
+                <div className="glass-soft rounded-2xl p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Unsettled</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{selectedMerchant.unsettled_payments}</p>
+                </div>
+                <div className="glass-soft rounded-2xl p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Needs attention</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{selectedMerchant.failed_payments}</p>
+                </div>
               </div>
-            </div>
+              <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">
+                Last payment activity: {formatTime(selectedMerchant.last_payment_at)}
+              </div>
+            </>
           ) : null}
         </Card>
 
@@ -222,6 +260,9 @@ export const AdminMerchantsPanel = () => {
                   <div>
                     <p className="text-white">{merchant.name}</p>
                     <p className="mt-1 text-xs text-slate-500">{merchant.email}</p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      {merchant.total_payments} payments · {merchant.settled_payments} settled · {merchant.unsettled_payments} unsettled
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
                     <span className="glass-soft rounded-full px-3 py-1 capitalize">
@@ -250,7 +291,6 @@ export const AdminMerchantsPanel = () => {
             ))}
           </div>
         </Card>
-
       </div>
     </div>
   );

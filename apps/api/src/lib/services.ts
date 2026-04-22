@@ -415,6 +415,68 @@ export const changePaymentStatus = async (
   await dispatchWebhook(merchantId, eventType, { paymentId, status, txHash, confirmations });
 };
 
+export const paymentLedgerBaseQuery = `
+  select
+    p.id,
+    p.merchant_id,
+    p.amount_fiat,
+    p.amount_crypto as quoted_amount_crypto,
+    coalesce(t.amount_crypto, p.amount_crypto) as received_amount_crypto,
+    p.exchange_rate,
+    p.fiat_currency,
+    p.settlement_currency,
+    p.network,
+    p.customer_email,
+    p.customer_name,
+    p.description,
+    p.status as payment_status,
+    coalesce(
+      t.status,
+      case
+        when p.status in ('pending', 'confirmed', 'failed', 'expired') then p.status
+        else 'created'
+      end
+    ) as transaction_status,
+    case
+      when s.status = 'processed' then 'settled'
+      when s.status = 'pending' then 'processing'
+      when s.status = 'failed' then 'settlement_failed'
+      when p.status = 'confirmed' then 'unsettled'
+      when p.status = 'failed' then 'not_settled'
+      when p.status = 'expired' then 'expired'
+      else 'awaiting_confirmation'
+    end as settlement_state,
+    s.status as settlement_status,
+    coalesce(t.confirmations, p.confirmations) as confirmations,
+    coalesce(t.tx_hash, p.tx_hash) as tx_hash,
+    p.wallet_address,
+    coalesce(w.provider, ((p.wallet_routes -> p.network) ->> 'provider'), 'binance') as wallet_provider,
+    coalesce(w.wallet_type, ((p.wallet_routes -> p.network) ->> 'walletType'), 'custodial') as wallet_type,
+    ((p.wallet_routes -> p.network) ->> 'sourceWalletId') as source_wallet_id,
+    s.provider as settlement_provider,
+    s.processed_at as settled_at,
+    t.created_at as transaction_created_at,
+    s.created_at as settlement_created_at,
+    p.created_at,
+    p.updated_at
+  from payments p
+  left join transactions t on t.payment_id = p.id
+  left join settlements s on s.payment_id = p.id
+  left join wallets w
+    on w.payment_id = p.id
+   and w.network = p.network
+   and w.address = p.wallet_address
+`;
+
+export const listPaymentLedger = async (merchantId: string) =>
+  query(
+    `${paymentLedgerBaseQuery}
+     where p.merchant_id = $1
+     order by p.created_at desc
+     limit 100`,
+    [merchantId]
+  ).then((res) => res.rows);
+
 export const listTransactions = async (merchantId: string) =>
   query(
     `select * from transactions where merchant_id = $1 order by created_at desc limit 100`,
@@ -690,8 +752,21 @@ export const listMerchantsForAdmin = async () =>
     updated_at: string;
     plan_code: string | null;
     subscription_status: string | null;
+    total_payments: number;
+    settled_payments: number;
+    unsettled_payments: number;
+    failed_payments: number;
+    last_payment_at: string | null;
   }>(
-    `select m.*, s.plan_code, s.status as subscription_status
+    `select
+        m.*,
+        s.plan_code,
+        s.status as subscription_status,
+        coalesce(stats.total_payments, 0)::int as total_payments,
+        coalesce(stats.settled_payments, 0)::int as settled_payments,
+        coalesce(stats.unsettled_payments, 0)::int as unsettled_payments,
+        coalesce(stats.failed_payments, 0)::int as failed_payments,
+        stats.last_payment_at
      from merchants m
      left join lateral (
        select plan_code, status from subscriptions s
@@ -699,6 +774,21 @@ export const listMerchantsForAdmin = async () =>
        order by s.created_at desc
        limit 1
      ) s on true
+     left join lateral (
+       select
+         count(*)::int as total_payments,
+         count(*) filter (where ledger.settlement_state = 'settled')::int as settled_payments,
+         count(*) filter (
+           where ledger.settlement_state in ('unsettled', 'processing', 'awaiting_confirmation')
+         )::int as unsettled_payments,
+         count(*) filter (
+           where ledger.settlement_state in ('settlement_failed', 'not_settled', 'expired')
+              or ledger.payment_status in ('failed', 'expired')
+         )::int as failed_payments,
+         max(ledger.created_at) as last_payment_at
+       from (${paymentLedgerBaseQuery}) ledger
+       where ledger.merchant_id = m.id
+     ) stats on true
      order by m.created_at desc`
   ).then((res) => res.rows);
 

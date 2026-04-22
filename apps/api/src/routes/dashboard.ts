@@ -7,6 +7,8 @@ import {
   createWebhookEndpoint,
   fetchPayment,
   getSubscriptionSummary,
+  listPaymentLedger,
+  paymentLedgerBaseQuery,
   listTransactions,
   listSettlements,
   listWallets,
@@ -28,7 +30,18 @@ dashboardRouter.use(requireJwt, redisRateLimit("dashboard", 300, 60));
 
 dashboardRouter.get("/overview", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const [payments, transactions, subscription] = await Promise.all([
+  const [
+    payments,
+    transactions,
+    subscription,
+    merchantFeatures,
+    dailyVolume,
+    settlementBreakdown,
+    networkBreakdown,
+    walletMix,
+    dailyUsage,
+    recentPayments
+  ] = await Promise.all([
     query<{ status: string; count: number; amount: string }>(
       `select status, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as amount
        from payments where merchant_id = $1 group by status`,
@@ -39,14 +52,134 @@ dashboardRouter.get("/overview", async (req, res) => {
        from payments where merchant_id = $1 and created_at >= date_trunc('month', now())`,
       [merchantId]
     ),
-    getSubscriptionSummary(merchantId)
+    getSubscriptionSummary(merchantId),
+    query<{ custodial_enabled: boolean; non_custodial_enabled: boolean }>(
+      `select custodial_enabled, non_custodial_enabled from merchants where id = $1 limit 1`,
+      [merchantId]
+    ),
+    query<{ day: string; count: number; volume: string; settled_volume: string }>(
+      `select
+          date_trunc('day', ledger.created_at)::date as day,
+          count(*)::int as count,
+          coalesce(sum(ledger.amount_fiat), 0)::numeric as volume,
+          coalesce(sum(ledger.amount_fiat) filter (where ledger.settlement_state = 'settled'), 0)::numeric as settled_volume
+       from (${paymentLedgerBaseQuery}) ledger
+       where ledger.merchant_id = $1 and ledger.created_at >= now() - interval '14 days'
+       group by 1
+       order by 1 asc`,
+      [merchantId]
+    ),
+    query<{ settlement_state: string; count: number; volume: string }>(
+      `select
+          settlement_state,
+          count(*)::int as count,
+          coalesce(sum(amount_fiat), 0)::numeric as volume
+       from (${paymentLedgerBaseQuery}) ledger
+       where ledger.merchant_id = $1
+       group by settlement_state
+       order by count desc`,
+      [merchantId]
+    ),
+    query<{
+      settlement_currency: string;
+      network: string;
+      wallet_type: string;
+      wallet_provider: string;
+      count: number;
+      volume: string;
+    }>(
+      `select
+          settlement_currency,
+          network,
+          wallet_type,
+          wallet_provider,
+          count(*)::int as count,
+          coalesce(sum(amount_fiat), 0)::numeric as volume
+       from (${paymentLedgerBaseQuery}) ledger
+       where ledger.merchant_id = $1
+       group by settlement_currency, network, wallet_type, wallet_provider
+       order by volume desc, count desc`,
+      [merchantId]
+    ),
+    query<{ wallet_type: string; provider: string; count: number }>(
+      `select wallet_type, provider, count(*)::int as count
+       from wallets
+       where merchant_id = $1 and is_active = true
+       group by wallet_type, provider
+       order by count desc`,
+      [merchantId]
+    ),
+    query<{ day: string; total: number }>(
+      `select date_trunc('day', created_at)::date as day, coalesce(sum(quantity), 0)::int as total
+       from usage_logs
+       where merchant_id = $1 and created_at >= now() - interval '14 days'
+       group by 1
+       order by 1 asc`,
+      [merchantId]
+    ),
+    query<{
+      id: string;
+      payment_status: string;
+      settlement_state: string;
+      amount_fiat: string;
+      settlement_currency: string;
+      network: string;
+      tx_hash: string | null;
+      created_at: string;
+    }>(
+      `select id, payment_status, settlement_state, amount_fiat, settlement_currency, network, tx_hash, created_at
+       from (${paymentLedgerBaseQuery}) ledger
+       where ledger.merchant_id = $1
+       order by created_at desc
+       limit 6`,
+      [merchantId]
+    )
   ]);
+
+  const paymentBreakdown = payments.rows;
+  const totalPayments = paymentBreakdown.reduce((sum, item) => sum + Number(item.count), 0);
+  const confirmedPayments = paymentBreakdown
+    .filter((item) => item.status === "confirmed")
+    .reduce((sum, item) => sum + Number(item.count), 0);
+  const unsettledStates = new Set(["unsettled", "processing", "awaiting_confirmation"]);
+  const unsettledCount = settlementBreakdown.rows
+    .filter((item) => unsettledStates.has(item.settlement_state))
+    .reduce((sum, item) => sum + Number(item.count), 0);
+  const settledCount = settlementBreakdown.rows
+    .filter((item) => item.settlement_state === "settled")
+    .reduce((sum, item) => sum + Number(item.count), 0);
+  const successRate = totalPayments ? Math.round((confirmedPayments / totalPayments) * 100) : 0;
+  const walletSummary = walletMix.rows.reduce(
+    (acc, item) => {
+      acc.total += Number(item.count);
+      if (item.wallet_type === "custodial") acc.custodial += Number(item.count);
+      if (item.wallet_type === "non_custodial") acc.nonCustodial += Number(item.count);
+      return acc;
+    },
+    { total: 0, custodial: 0, nonCustodial: 0 }
+  );
 
   const responsePayload = {
     metrics: {
       monthlyTransactions: transactions.rows[0]?.total ?? 0,
       monthlyVolume: transactions.rows[0]?.volume ?? 0,
-      paymentBreakdown: payments.rows
+      paymentBreakdown,
+      successRate,
+      settledCount,
+      unsettledCount
+    },
+    charts: {
+      dailyVolume: dailyVolume.rows,
+      settlementBreakdown: settlementBreakdown.rows,
+      networkBreakdown: networkBreakdown.rows,
+      walletMix: walletMix.rows,
+      dailyUsage: dailyUsage.rows
+    },
+    recentPayments: recentPayments.rows,
+    walletSummary: {
+      ...walletSummary,
+      custodialEnabled: merchantFeatures.rows[0]?.custodial_enabled ?? false,
+      nonCustodialEnabled: merchantFeatures.rows[0]?.non_custodial_enabled ?? false
     },
     subscription
   };
@@ -75,12 +208,7 @@ dashboardRouter.get("/settlements", async (req, res) => {
 
 dashboardRouter.get("/payments", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const result = await query(
-    `select id, merchant_id, amount_fiat, fiat_currency, settlement_currency, network, customer_email, customer_name, description, status, confirmations, tx_hash, wallet_address, created_at
-     from payments where merchant_id = $1 order by created_at desc limit 100`,
-    [merchantId]
-  );
-  res.json({ data: result.rows });
+  res.json({ data: await listPaymentLedger(merchantId) });
 });
 
 dashboardRouter.get("/subscriptions", async (req, res) => {

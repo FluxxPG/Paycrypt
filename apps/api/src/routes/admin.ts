@@ -17,6 +17,7 @@ import {
   listWebhookLogsForAdmin,
   listWalletVerificationsForAdmin,
   listWalletsForAdmin,
+  paymentLedgerBaseQuery,
   createApiKeysForAdmin,
   rotateApiKeyForAdmin,
   revokeApiKeyForAdmin,
@@ -250,6 +251,8 @@ adminRouter.get("/analytics", async (_req, res) => {
   const [
     merchants,
     payments,
+    ledger,
+    walletSources,
     revenue,
     queueCounts,
     webhookSummary,
@@ -262,6 +265,46 @@ adminRouter.get("/analytics", async (_req, res) => {
     query<{ status: string; count: number; volume: string }>(
       `select status, count(*)::int as count, coalesce(sum(amount_fiat), 0)::numeric as volume
        from payments group by status`
+    ),
+    query<{
+      total: number;
+      settled: number;
+      unsettled: number;
+      failed: number;
+      custodial: number;
+      non_custodial: number;
+      settled_volume: string;
+      unsettled_volume: string;
+    }>(
+      `select
+          count(*)::int as total,
+          count(*) filter (where settlement_state = 'settled')::int as settled,
+          count(*) filter (
+            where settlement_state in ('unsettled', 'processing', 'awaiting_confirmation')
+          )::int as unsettled,
+          count(*) filter (
+            where settlement_state in ('settlement_failed', 'not_settled', 'expired')
+               or payment_status in ('failed', 'expired')
+          )::int as failed,
+          count(*) filter (where wallet_type = 'custodial')::int as custodial,
+          count(*) filter (where wallet_type = 'non_custodial')::int as non_custodial,
+          coalesce(sum(amount_fiat) filter (where settlement_state = 'settled'), 0)::numeric as settled_volume,
+          coalesce(
+            sum(amount_fiat) filter (
+              where settlement_state in ('unsettled', 'processing', 'awaiting_confirmation', 'settlement_failed')
+            ),
+            0
+          )::numeric as unsettled_volume
+       from (${paymentLedgerBaseQuery}) ledger`
+    ),
+    query<{ wallet_type: string; wallet_provider: string; count: number }>(
+      `select
+          wallet_type,
+          wallet_provider,
+          count(*)::int as count
+       from (${paymentLedgerBaseQuery}) ledger
+       group by wallet_type, wallet_provider
+       order by count desc`
     ),
     query<{ plan_code: string; merchants: number; mrr: string }>(
       `select plan_code, count(*)::int as merchants, sum(monthly_price_inr)::numeric as mrr
@@ -307,6 +350,17 @@ adminRouter.get("/analytics", async (_req, res) => {
   res.json({
     merchants: merchants.rows[0]?.total ?? 0,
     payments: payments.rows,
+    ledger: ledger.rows[0] ?? {
+      total: 0,
+      settled: 0,
+      unsettled: 0,
+      failed: 0,
+      custodial: 0,
+      non_custodial: 0,
+      settled_volume: 0,
+      unsettled_volume: 0
+    },
+    walletSources: walletSources.rows,
     revenue: revenue.rows,
     monitoring: {
       queues: {
