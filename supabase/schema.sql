@@ -76,11 +76,14 @@ create table if not exists wallets (
 create table if not exists subscriptions (
   id uuid primary key default gen_random_uuid(),
   merchant_id text not null references merchants(id) on delete cascade,
-  plan_code text not null check (plan_code in ('starter', 'business', 'premium', 'custom')),
+  plan_code text not null check (plan_code in ('starter', 'custom_selective', 'custom_enterprise')),
   status text not null default 'active',
   monthly_price_inr numeric(12,2) not null default 0,
   transaction_limit integer not null default 0,
   setup_fee_inr numeric(12,2) not null default 0,
+  setup_fee_usdt numeric(18,2) not null default 0,
+  platform_fee_percent numeric(5,2) not null default 1,
+  non_custodial_wallet_limit integer not null default 0,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -91,7 +94,7 @@ create table if not exists billing_invoices (
   invoice_number text not null unique,
   merchant_id text not null references merchants(id) on delete cascade,
   subscription_id uuid references subscriptions(id) on delete set null,
-  plan_code text not null check (plan_code in ('starter', 'business', 'premium', 'custom')),
+  plan_code text not null check (plan_code in ('starter', 'custom_selective', 'custom_enterprise')),
   status text not null default 'issued' check (status in ('issued', 'paid', 'overdue', 'void')),
   billing_period_start date not null,
   billing_period_end date not null,
@@ -366,17 +369,23 @@ insert into subscriptions (
   status,
   monthly_price_inr,
   transaction_limit,
-  setup_fee_inr
+  setup_fee_inr,
+  setup_fee_usdt,
+  platform_fee_percent,
+  non_custodial_wallet_limit
 )
 values
-  ('mrc_demo', 'business', 'active', 15000, 20000, 0),
-  ('mrc_admin', 'premium', 'active', 35000, 100000, 0)
+  ('mrc_demo', 'starter', 'active', 0, 5000, 0, 0, 1, 0),
+  ('mrc_admin', 'custom_selective', 'active', 0, 20000, 0, 0, 2, 1)
 on conflict (merchant_id) do update set
   plan_code = excluded.plan_code,
   status = excluded.status,
   monthly_price_inr = excluded.monthly_price_inr,
   transaction_limit = excluded.transaction_limit,
   setup_fee_inr = excluded.setup_fee_inr,
+  setup_fee_usdt = excluded.setup_fee_usdt,
+  platform_fee_percent = excluded.platform_fee_percent,
+  non_custodial_wallet_limit = excluded.non_custodial_wallet_limit,
   updated_at = now();
 
 insert into users (

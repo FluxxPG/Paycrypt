@@ -48,7 +48,7 @@ adminRouter.post("/merchants", requireAdmin(true), async (req, res) => {
     email: string;
     slug?: string;
     ownerName?: string;
-    planCode?: "starter" | "business" | "premium" | "custom";
+    planCode?: "starter" | "custom_selective" | "custom_enterprise";
   };
   const responsePayload = await createMerchantForAdmin({
     name,
@@ -111,17 +111,21 @@ adminRouter.post("/merchants/:id/non-custodial", requireAdmin(true), async (req,
 });
 
 adminRouter.post("/merchants/:id/subscription", requireAdmin(true), async (req, res) => {
-  const { planCode, monthlyPriceInr, transactionLimit, setupFeeInr, status } = req.body as {
-    planCode: "starter" | "business" | "premium" | "custom";
+  const { planCode, monthlyPriceInr, transactionLimit, setupFeeInr, setupFeeUsdt, platformFeePercent, status } = req.body as {
+    planCode: "starter" | "custom_selective" | "custom_enterprise";
     monthlyPriceInr?: number;
     transactionLimit?: number;
     setupFeeInr?: number;
+    setupFeeUsdt?: number;
+    platformFeePercent?: number;
     status?: string;
   };
   const responsePayload = await updateMerchantSubscription(String(req.params.id), planCode, {
     monthlyPriceInr,
     transactionLimit,
     setupFeeInr,
+    setupFeeUsdt,
+    platformFeePercent,
     status,
     actorId: (req as any).actor.userId
   });

@@ -260,13 +260,46 @@ dashboardRouter.post("/checkout-preview", async (req, res) => {
     settlementCurrency,
     network,
     description: description ?? "Merchant checkout preview",
-    successUrl: `${process.env.APP_BASE_URL}/dashboard/settings?preview=success`,
-    cancelUrl: `${process.env.APP_BASE_URL}/dashboard/settings?preview=cancel`,
+    successUrl: `${process.env.APP_BASE_URL}/preview/success`,
+    cancelUrl: `${process.env.APP_BASE_URL}/preview/cancel`,
     metadata: {
       preview: "true",
       source: "merchant_settings"
     }
   });
+
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/checkout-preview/non-custodial", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { amountFiat, fiatCurrency, settlementCurrency, network, description } = req.body as {
+    amountFiat: number;
+    fiatCurrency?: string;
+    settlementCurrency?: string;
+    network?: string;
+    description?: string;
+  };
+
+  const responsePayload = await createPaymentIntent(
+    merchantId,
+    {
+      amountFiat,
+      fiatCurrency: fiatCurrency ?? "INR",
+      settlementCurrency,
+      network,
+      description: description ?? "Non-custodial checkout preview",
+      successUrl: `${process.env.APP_BASE_URL}/preview/success`,
+      cancelUrl: `${process.env.APP_BASE_URL}/preview/cancel`,
+      metadata: {
+        preview: "true",
+        source: "merchant_settings",
+        previewMode: "non_custodial"
+      }
+    },
+    { walletPreference: "non_custodial_only" }
+  );
 
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
@@ -285,7 +318,9 @@ dashboardRouter.get("/wallets", async (req, res) => {
       custodialEnabled: merchantResult.rows[0]?.custodial_enabled ?? true,
       nonCustodialEnabled: billingContext.plan.nonCustodialEnabled && billingContext.merchantNonCustodialEnabled,
       planCode: billingContext.planCode,
-      priorityProcessing: billingContext.plan.priorityProcessing
+      priorityProcessing: billingContext.plan.priorityProcessing,
+      nonCustodialWalletLimit: billingContext.nonCustodialWalletLimit,
+      platformFeePercent: billingContext.platformFeePercent
     },
     custodialProvisioning: Object.entries(custodialProvisioningMatrix).flatMap(([asset, networks]) =>
       networks.map((network) => ({
@@ -566,11 +601,11 @@ dashboardRouter.delete("/api-keys/:id", async (req, res) => {
 
 dashboardRouter.post("/subscriptions/plan", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const { planCode } = req.body as { planCode: "starter" | "business" | "premium" | "custom" };
-  if (planCode === "custom") {
+  const { planCode } = req.body as { planCode: "starter" | "custom_selective" | "custom_enterprise" };
+  if (planCode === "custom_enterprise") {
     res.status(403).json({
-      error: "custom_plan_requires_admin",
-      message: "Custom plans require an admin override"
+      error: "custom_enterprise_requires_admin",
+      message: "Custom Enterprise requires an admin override"
     });
     return;
   }

@@ -156,7 +156,7 @@ export const AdminMerchantsPanel = () => {
             onChange={(event) => setForm((prev) => ({ ...prev, planCode: event.target.value }))}
             className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
           >
-            {["starter", "business", "premium", "custom"].map((plan) => (
+            {["starter", "custom_selective", "custom_enterprise"].map((plan) => (
               <option key={plan} value={plan} className="bg-slate-900">
                 {plan}
               </option>
@@ -267,7 +267,7 @@ export const AdminMerchantsPanel = () => {
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
                     <span className="glass-soft rounded-full px-3 py-1 capitalize">
-                      {merchant.plan_code ?? "custom"}
+                      {merchant.plan_code ?? "custom_selective"}
                     </span>
                     <span className="glass-soft rounded-full px-3 py-1">{merchant.status}</span>
                     <span className="glass-soft rounded-full px-3 py-1">

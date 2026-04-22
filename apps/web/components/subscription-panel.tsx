@@ -9,7 +9,7 @@ import { apiFetch } from "../lib/authed-fetch";
 type InvoiceRow = {
   id: string;
   invoice_number: string;
-  plan_code: "starter" | "business" | "premium" | "custom";
+  plan_code: "starter" | "custom_selective" | "custom_enterprise";
   status: "issued" | "paid" | "overdue" | "void" | string;
   billing_period_start: string;
   billing_period_end: string;
@@ -25,11 +25,14 @@ type InvoiceRow = {
 
 type SubscriptionSummary = {
   subscription?: {
-    plan_code: "starter" | "business" | "premium" | "custom";
+    plan_code: "starter" | "custom_selective" | "custom_enterprise";
     status: string;
     monthly_price_inr: number | string;
     transaction_limit: number;
     setup_fee_inr: number | string;
+    setup_fee_usdt: number | string;
+    platform_fee_percent: number | string;
+    non_custodial_wallet_limit: number;
     metadata: Record<string, unknown>;
   };
   usage: Array<{ event_type: string; total: number }>;
@@ -48,30 +51,23 @@ const plans = [
   {
     code: "starter",
     title: "Starter",
-    price: "INR 10,000",
+    price: "Free",
     limit: "5,000 tx",
-    note: "Custodial only"
+    note: "1% platform fee · custodial only"
   },
   {
-    code: "business",
-    title: "Business",
-    price: "INR 15,000",
+    code: "custom_selective",
+    title: "Custom Selective",
+    price: "Custom pricing",
     limit: "20,000 tx",
-    note: "Priority processing"
+    note: "2% platform fee · one non-custodial wallet (admin unlock)"
   },
   {
-    code: "premium",
-    title: "Premium",
-    price: "INR 35,000",
-    limit: "100,000 tx",
-    note: "Non-custodial eligible"
-  },
-  {
-    code: "custom",
-    title: "Custom",
-    price: "POA",
+    code: "custom_enterprise",
+    title: "Custom Enterprise",
+    price: "Custom pricing",
     limit: "Unlimited",
-    note: "Pay-as-you-go"
+    note: "Admin editable fee % · infinite non-custodial wallets · setup 10,000 INR/USDT"
   }
 ] as const;
 
@@ -123,7 +119,7 @@ export const SubscriptionPanel = () => {
     return `${Math.max(0, limit - used).toLocaleString("en-IN")} remaining`;
   }, [limit, used]);
 
-  const changePlan = async (planCode: "starter" | "business" | "premium" | "custom") => {
+  const changePlan = async (planCode: "starter" | "custom_selective" | "custom_enterprise") => {
     setLoading(true);
     try {
       await apiFetch("/dashboard/subscriptions/plan", {
@@ -178,6 +174,13 @@ export const SubscriptionPanel = () => {
               Monthly usage: {used.toLocaleString("en-IN")} / {limit ? limit.toLocaleString("en-IN") : "Unlimited"}
             </div>
             <div className="glass-soft rounded-2xl p-4">{remaining}</div>
+            <div className="glass-soft rounded-2xl p-4">
+              Platform fee: {Number(summary.subscription?.platform_fee_percent ?? 1).toFixed(2)}%
+            </div>
+            <div className="glass-soft rounded-2xl p-4">
+              Setup charge: INR {Number(summary.subscription?.setup_fee_inr ?? 0).toLocaleString("en-IN")} / USDT{" "}
+              {Number(summary.subscription?.setup_fee_usdt ?? 0).toLocaleString("en-IN")}
+            </div>
           </div>
           <div className="mt-6 grid gap-3 md:grid-cols-3">
             <div className="glass-soft rounded-2xl p-4">
@@ -217,10 +220,10 @@ export const SubscriptionPanel = () => {
                   </div>
                   <Button
                     variant={currentPlan === plan.code ? "secondary" : "default"}
-                    disabled={loading || currentPlan === plan.code || plan.code === "custom"}
+                    disabled={loading || currentPlan === plan.code || plan.code === "custom_enterprise"}
                     onClick={() => changePlan(plan.code)}
                   >
-                    {currentPlan === plan.code ? "Active" : plan.code === "custom" ? "Admin only" : "Switch"}
+                    {currentPlan === plan.code ? "Active" : plan.code === "custom_enterprise" ? "Admin only" : "Switch"}
                   </Button>
                 </div>
               </div>

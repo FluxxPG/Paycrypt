@@ -71,7 +71,7 @@ export const MerchantSettingsPanel = () => {
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [selectedRoutes, setSelectedRoutes] = useState<Record<string, string[]>>({});
   const [selectedDefaultRouteKey, setSelectedDefaultRouteKey] = useState("");
-  const [previewMode, setPreviewMode] = useState<"default" | "override">("default");
+  const [previewMode, setPreviewMode] = useState<"default" | "override" | "non_custodial" | "demo">("default");
   const [previewForm, setPreviewForm] = useState({
     amountFiat: 2499,
     fiatCurrency: "INR",
@@ -239,21 +239,27 @@ export const MerchantSettingsPanel = () => {
     setBusy("preview");
     setError(null);
     try {
-      const payload = await apiFetch<PreviewPayload>("/dashboard/checkout-preview", {
-        method: "POST",
-        body: JSON.stringify({
-          amountFiat: previewForm.amountFiat,
-          fiatCurrency: previewForm.fiatCurrency,
-          description: previewForm.description,
-          ...(previewMode === "override"
-            ? {
-                settlementCurrency: previewForm.settlementCurrency,
-                network: previewForm.network
-              }
-            : {})
-        })
-      });
-      setPreviewCheckoutUrl(payload.checkoutUrl);
+      if (previewMode === "demo") {
+        setPreviewCheckoutUrl("/preview/demo");
+      } else {
+        const endpoint =
+          previewMode === "non_custodial" ? "/dashboard/checkout-preview/non-custodial" : "/dashboard/checkout-preview";
+        const payload = await apiFetch<PreviewPayload>(endpoint, {
+          method: "POST",
+          body: JSON.stringify({
+            amountFiat: previewForm.amountFiat,
+            fiatCurrency: previewForm.fiatCurrency,
+            description: previewForm.description,
+            ...(previewMode === "override" || previewMode === "non_custodial"
+              ? {
+                  settlementCurrency: previewForm.settlementCurrency,
+                  network: previewForm.network
+                }
+              : {})
+          })
+        });
+        setPreviewCheckoutUrl(payload.checkoutUrl);
+      }
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : "Failed to create preview");
     } finally {
@@ -404,6 +410,28 @@ export const MerchantSettingsPanel = () => {
               >
                 Override for preview
               </button>
+              <button
+                type="button"
+                onClick={() => setPreviewMode("non_custodial")}
+                className={`rounded-full px-4 py-2 text-sm transition ${
+                  previewMode === "non_custodial"
+                    ? "bg-cyan-400 text-slate-950"
+                    : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                }`}
+              >
+                Non-custodial preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewMode("demo")}
+                className={`rounded-full px-4 py-2 text-sm transition ${
+                  previewMode === "demo"
+                    ? "bg-cyan-400 text-slate-950"
+                    : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                }`}
+              >
+                Demo preview
+              </button>
             </div>
 
             <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -424,7 +452,7 @@ export const MerchantSettingsPanel = () => {
                 placeholder="Fiat currency"
               />
 
-              {previewMode === "override" ? (
+              {previewMode === "override" || previewMode === "non_custodial" ? (
                 <>
                   <select
                     value={previewForm.settlementCurrency}

@@ -232,11 +232,19 @@ const getSelectedCustodialWallet = async (
   return result.rows[0] ?? null;
 };
 
-export const createPaymentIntent = async (merchantId: string, input: unknown) => {
+type WalletPreference = "auto" | "non_custodial_only";
+
+export const createPaymentIntent = async (
+  merchantId: string,
+  input: unknown,
+  options: { walletPreference?: WalletPreference } = {}
+) => {
   const parsed = createPaymentSchema.parse(input);
   const checkoutSettings = await getMerchantCheckoutConfig(merchantId);
   const requestedRoute = resolveRequestedCheckoutRoute(parsed, checkoutSettings);
-  await assertMerchantCanAcceptPayment(merchantId, requestedRoute.asset, requestedRoute.network);
+  const billingContext = await assertMerchantCanAcceptPayment(merchantId, requestedRoute.asset, requestedRoute.network);
+  const platformFeePercent = Number(billingContext.platformFeePercent ?? 0);
+  const platformFeeAmountFiat = Number(((parsed.amountFiat * platformFeePercent) / 100).toFixed(2));
   const paymentId = createPaymentReference();
   const quote = await quoteCryptoAmount(requestedRoute.asset, parsed.fiatCurrency, parsed.amountFiat);
   const acceptedRoute = checkoutSettings.acceptedRoutes.find((route) => route.asset === requestedRoute.asset);
@@ -265,6 +273,11 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
     }
   > = {};
 
+  const walletPreference = options.walletPreference ?? "auto";
+  if (walletPreference === "non_custodial_only") {
+    await assertMerchantCanManageNonCustodialWallets(merchantId);
+  }
+
   for (const network of supportedRouteNetworks) {
     const nonCustodialWallet = await getSelectedNonCustodialWallet(merchantId, requestedRoute.asset, network);
     if (nonCustodialWallet) {
@@ -278,6 +291,17 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
         exchangeRate: quote.exchangeRate,
         sourceWalletId: nonCustodialWallet.id
       };
+      continue;
+    }
+
+    if (walletPreference === "non_custodial_only") {
+      if (network === requestedRoute.network) {
+        throw new AppError(
+          403,
+          "non_custodial_wallet_missing",
+          "No active non-custodial wallet is onboarded for this asset/network. Add and verify a wallet in Wallets before running a non-custodial preview."
+        );
+      }
       continue;
     }
 
@@ -308,6 +332,16 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
         exchangeRate: quote.exchangeRate
       };
     } catch (error) {
+      if (error instanceof Error && error.message.includes("Binance API credentials are not configured")) {
+        if (network === requestedRoute.network) {
+          throw new AppError(
+            503,
+            "custodial_provider_unavailable",
+            "Binance custodial provisioning is unavailable until Binance API credentials are configured. Connect merchant Binance keys from the Wallets page to enable custodial checkout previews."
+          );
+        }
+        continue;
+      }
       if (network === requestedRoute.network) {
         throw error;
       }
@@ -348,7 +382,11 @@ export const createPaymentIntent = async (merchantId: string, input: unknown) =>
         parsed.customerEmail ?? null,
         parsed.customerName ?? null,
         parsed.description,
-        JSON.stringify(parsed.metadata),
+        JSON.stringify({
+          ...parsed.metadata,
+          platformFeePercent,
+          platformFeeAmountFiat
+        }),
         walletAddress,
         JSON.stringify(walletRoutes),
         expiresAt,
@@ -1049,12 +1087,23 @@ export const registerNonCustodialWallet = async (
     provider?: string;
   }
 ) => {
-  const [merchantResult, billingContext] = await Promise.all([
-    query<{ non_custodial_enabled: boolean }>("select non_custodial_enabled from merchants where id = $1", [merchantId]),
-    getMerchantBillingContext(merchantId)
-  ]);
-  if (!merchantResult.rows[0]?.non_custodial_enabled || !billingContext.plan.nonCustodialEnabled) {
-    throw new AppError(403, "non_custodial_not_enabled", "Non-custodial wallets require admin approval");
+  const billingContext = await assertMerchantCanManageNonCustodialWallets(merchantId);
+  const walletLimit = billingContext.nonCustodialWalletLimit;
+  if (walletLimit >= 0) {
+    const walletCountResult = await query<{ total: number }>(
+      `select count(*)::int as total
+       from wallets
+       where merchant_id = $1 and wallet_type = 'non_custodial' and payment_id is null`,
+      [merchantId]
+    );
+    const currentWalletCount = walletCountResult.rows[0]?.total ?? 0;
+    if (currentWalletCount >= walletLimit) {
+      throw new AppError(
+        403,
+        "non_custodial_wallet_limit_reached",
+        `Your current plan allows only ${walletLimit} reusable non-custodial wallet${walletLimit === 1 ? "" : "s"}`
+      );
+    }
   }
 
   const result = await query(
@@ -1195,6 +1244,9 @@ export const getSubscriptionSummary = async (merchantId: string) => {
     monthly_price_inr: string;
     transaction_limit: number;
     setup_fee_inr: string;
+    setup_fee_usdt: string;
+    platform_fee_percent: string;
+    non_custodial_wallet_limit: number | null;
     metadata: Record<string, unknown>;
     created_at: string;
     updated_at: string;
@@ -1721,6 +1773,7 @@ export const approveWalletVerificationForAdmin = async (
   merchantId: string,
   actorId: string
 ) => {
+  const billingContext = await assertMerchantCanManageNonCustodialWallets(merchantId);
   const result = await approveWalletVerification(verificationId, merchantId);
   const existing = await query(
     `select id from wallets
@@ -1730,6 +1783,24 @@ export const approveWalletVerificationForAdmin = async (
   );
 
   if (!existing.rows[0]) {
+    const walletLimit = billingContext.nonCustodialWalletLimit;
+    if (walletLimit >= 0) {
+      const walletCountResult = await query<{ total: number }>(
+        `select count(*)::int as total
+         from wallets
+         where merchant_id = $1 and wallet_type = 'non_custodial' and payment_id is null`,
+        [merchantId]
+      );
+      const currentWalletCount = walletCountResult.rows[0]?.total ?? 0;
+      if (currentWalletCount >= walletLimit) {
+        throw new AppError(
+          403,
+          "non_custodial_wallet_limit_reached",
+          `This merchant plan allows only ${walletLimit} reusable non-custodial wallet${walletLimit === 1 ? "" : "s"}`
+        );
+      }
+    }
+
     const selectedResult = await query(
       `select id from wallets
        where merchant_id = $1 and asset = $2 and network = $3 and is_selected = true
@@ -1808,6 +1879,9 @@ export const updateMerchantSubscription = async (
     monthlyPriceInr?: number;
     transactionLimit?: number;
     setupFeeInr?: number;
+    setupFeeUsdt?: number;
+    platformFeePercent?: number;
+    nonCustodialWalletLimit?: number | null;
     status?: string;
     metadata?: Record<string, unknown>;
     actorId?: string;

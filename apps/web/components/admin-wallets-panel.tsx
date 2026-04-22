@@ -110,7 +110,7 @@ export const AdminWalletsPanel = () => {
           <div>
             <h2 className="text-lg font-medium text-white">Merchant entitlement</h2>
             <p className="text-sm text-slate-400">
-              Activate premium non-custodial capability only for merchants you approve.
+              Activate non-custodial capability only for merchants you approve on eligible custom plans.
             </p>
           </div>
           <Badge>{selectedMerchant?.name ?? "Select merchant"}</Badge>
@@ -230,7 +230,7 @@ export const AdminWalletsPanel = () => {
           <div>
             <h2 className="text-lg font-medium text-white">Wallet verification queue</h2>
             <p className="text-sm text-slate-400">
-              Approve verified wallet ownership only after the merchant has premium entitlement enabled.
+              Approve verified wallet ownership only after the merchant has non-custodial entitlement enabled.
             </p>
           </div>
           <Badge>{verifications.length}</Badge>

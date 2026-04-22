@@ -4,34 +4,38 @@ export const planCatalog = {
   starter: {
     code: "starter",
     name: "Starter",
-    monthlyPriceInr: 10000,
+    monthlyPriceInr: 0,
     transactionLimit: 5000,
     priorityProcessing: false,
-    nonCustodialEnabled: false
+    nonCustodialEnabled: false,
+    platformFeePercent: 1,
+    nonCustodialWalletLimit: 0,
+    setupFeeInr: 0,
+    setupFeeUsdt: 0
   },
-  business: {
-    code: "business",
-    name: "Business",
-    monthlyPriceInr: 15000,
+  custom_selective: {
+    code: "custom_selective",
+    name: "Custom Selective",
+    monthlyPriceInr: 0,
     transactionLimit: 20000,
     priorityProcessing: true,
-    nonCustodialEnabled: false
+    nonCustodialEnabled: true,
+    platformFeePercent: 2,
+    nonCustodialWalletLimit: 1,
+    setupFeeInr: 0,
+    setupFeeUsdt: 0
   },
-  premium: {
-    code: "premium",
-    name: "Premium",
-    monthlyPriceInr: 35000,
-    transactionLimit: 100000,
-    priorityProcessing: true,
-    nonCustodialEnabled: true
-  },
-  custom: {
-    code: "custom",
-    name: "Custom",
+  custom_enterprise: {
+    code: "custom_enterprise",
+    name: "Custom Enterprise",
     monthlyPriceInr: 0,
     transactionLimit: 0,
     priorityProcessing: true,
-    nonCustodialEnabled: true
+    nonCustodialEnabled: true,
+    platformFeePercent: 2,
+    nonCustodialWalletLimit: -1,
+    setupFeeInr: 10000,
+    setupFeeUsdt: 10000
   }
 } as const;
 
@@ -147,7 +151,7 @@ export const merchantFeatureSchema = z.object({
   custodialEnabled: z.boolean(),
   nonCustodialEnabled: z.boolean(),
   priorityProcessing: z.boolean(),
-  planCode: z.enum(["starter", "business", "premium", "custom"])
+  planCode: z.enum(["starter", "custom_selective", "custom_enterprise"])
 });
 
 export type MerchantFeatures = z.infer<typeof merchantFeatureSchema>;

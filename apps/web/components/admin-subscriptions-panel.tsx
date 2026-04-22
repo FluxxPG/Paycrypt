@@ -18,10 +18,12 @@ type Merchant = {
 export const AdminSubscriptionsPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
-  const [planCode, setPlanCode] = useState<"starter" | "business" | "premium" | "custom">("business");
+  const [planCode, setPlanCode] = useState<"starter" | "custom_selective" | "custom_enterprise">("custom_selective");
   const [customMonthlyPriceInr, setCustomMonthlyPriceInr] = useState("0");
   const [customTransactionLimit, setCustomTransactionLimit] = useState("0");
-  const [customSetupFeeInr, setCustomSetupFeeInr] = useState("0");
+  const [customSetupFeeInr, setCustomSetupFeeInr] = useState("10000");
+  const [customSetupFeeUsdt, setCustomSetupFeeUsdt] = useState("10000");
+  const [platformFeePercent, setPlatformFeePercent] = useState("2");
   const [busy, setBusy] = useState(false);
 
   const selectedMerchant = useMemo(
@@ -53,9 +55,12 @@ export const AdminSubscriptionsPanel = () => {
         method: "POST",
         body: JSON.stringify({
           planCode,
-          monthlyPriceInr: planCode === "custom" ? Number(customMonthlyPriceInr) : undefined,
-          transactionLimit: planCode === "custom" ? Number(customTransactionLimit) : undefined,
-          setupFeeInr: planCode === "custom" ? Number(customSetupFeeInr) : undefined
+          monthlyPriceInr: planCode === "custom_enterprise" ? Number(customMonthlyPriceInr) : undefined,
+          transactionLimit: planCode === "custom_enterprise" ? Number(customTransactionLimit) : undefined,
+          setupFeeInr: planCode === "custom_enterprise" ? Number(customSetupFeeInr) : undefined,
+          setupFeeUsdt: planCode === "custom_enterprise" ? Number(customSetupFeeUsdt) : undefined,
+          platformFeePercent:
+            planCode === "custom_enterprise" ? Number(platformFeePercent) : planCode === "custom_selective" ? 2 : 1
         })
       });
       const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
@@ -100,14 +105,11 @@ export const AdminSubscriptionsPanel = () => {
               <option value="starter" className="bg-slate-900">
                 Starter
               </option>
-              <option value="business" className="bg-slate-900">
-                Business
+              <option value="custom_selective" className="bg-slate-900">
+                Custom Selective
               </option>
-              <option value="premium" className="bg-slate-900">
-                Premium
-              </option>
-              <option value="custom" className="bg-slate-900">
-                Custom
+              <option value="custom_enterprise" className="bg-slate-900">
+                Custom Enterprise
               </option>
             </select>
           </div>
@@ -117,8 +119,8 @@ export const AdminSubscriptionsPanel = () => {
             </Button>
           </div>
         </div>
-        {planCode === "custom" ? (
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
+        {planCode === "custom_enterprise" ? (
+          <div className="mt-5 grid gap-4 md:grid-cols-5">
             <div>
               <label className="mb-2 block text-sm text-slate-300">Monthly price INR</label>
               <Input value={customMonthlyPriceInr} onChange={(e) => setCustomMonthlyPriceInr(e.target.value)} />
@@ -131,12 +133,20 @@ export const AdminSubscriptionsPanel = () => {
               <label className="mb-2 block text-sm text-slate-300">Setup fee INR</label>
               <Input value={customSetupFeeInr} onChange={(e) => setCustomSetupFeeInr(e.target.value)} />
             </div>
+            <div>
+              <label className="mb-2 block text-sm text-slate-300">Setup fee USDT</label>
+              <Input value={customSetupFeeUsdt} onChange={(e) => setCustomSetupFeeUsdt(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm text-slate-300">Platform fee %</label>
+              <Input value={platformFeePercent} onChange={(e) => setPlatformFeePercent(e.target.value)} />
+            </div>
           </div>
         ) : null}
         {selectedMerchant ? (
           <div className="mt-5 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
             <div className="glass-soft rounded-2xl p-4">Selected: {selectedMerchant.name}</div>
-            <div className="glass-soft rounded-2xl p-4">Plan: {selectedMerchant.plan_code ?? "custom"}</div>
+            <div className="glass-soft rounded-2xl p-4">Plan: {selectedMerchant.plan_code ?? "custom_selective"}</div>
             <div className="glass-soft rounded-2xl p-4">
               Status: {selectedMerchant.subscription_status ?? "inactive"}
             </div>

@@ -21,7 +21,7 @@ const features = [
   },
   {
     title: "Wallet and settlement visibility",
-    text: "Monitor custodial balances, premium non-custodial access, settlement windows, and payment health from one console.",
+    text: "Monitor custodial balances, plan-gated non-custodial access, settlement windows, and payment health from one console.",
     icon: Wallet
   },
   {

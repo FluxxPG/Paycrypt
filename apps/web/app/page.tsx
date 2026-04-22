@@ -33,7 +33,8 @@ export default function HomePage() {
             Crypto-native payment infrastructure with Stripe-grade reliability.
           </h1>
           <p className="mt-4 max-w-2xl text-lg text-slate-300">
-            Accept BTC, ETH, and USDT with custodial defaults, premium non-custodial wallets, real-time confirmations, hosted checkout, webhooks, and enterprise-grade controls.
+            Accept BTC, ETH, and USDT with custodial defaults, plan-gated non-custodial wallets, real-time confirmations,
+            hosted checkout, webhooks, and enterprise-grade controls.
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
             <Link href="/login" className="rounded-2xl bg-cyan-400 px-6 py-3 text-sm font-medium text-slate-950">
@@ -93,10 +94,10 @@ export default function HomePage() {
               <Blocks className="h-5 w-5" />
               <p className="text-sm">Wallet strategy</p>
             </div>
-            <h2 className="mt-6 text-2xl font-semibold text-white">Custodial defaults, premium non-custodial unlock.</h2>
+            <h2 className="mt-6 text-2xl font-semibold text-white">Custodial defaults, admin-gated non-custodial unlock.</h2>
             <p className="mt-3 text-sm text-slate-300">
               Binance custodial wallets are provisioned automatically. Super admins can unlock non-custodial TRON, ETH, and SOL
-              wallets with premium pricing controls per merchant.
+              wallets with per-merchant custom pricing controls.
             </p>
             <div className="mt-6 flex flex-wrap gap-2 text-xs text-slate-300">
               {["TRC20", "ERC20", "SOL", "BTC", "ETH", "USDT"].map((item) => (

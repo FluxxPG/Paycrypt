@@ -11,6 +11,10 @@ type MerchantBillingRow = {
   plan_code: PlanCode | null;
   monthly_price_inr: string | null;
   transaction_limit: number | null;
+  setup_fee_inr: string | null;
+  setup_fee_usdt: string | null;
+  platform_fee_percent: string | null;
+  non_custodial_wallet_limit: number | null;
 };
 
 type MonthlyCountRow = {
@@ -116,7 +120,11 @@ export const getMerchantBillingContext = async (merchantId: string) => {
       s.status as subscription_status,
       s.plan_code,
       s.monthly_price_inr,
-      s.transaction_limit
+      s.transaction_limit,
+      s.setup_fee_inr,
+      s.setup_fee_usdt,
+      s.platform_fee_percent,
+      s.non_custodial_wallet_limit
      from merchants m
      left join subscriptions s on s.merchant_id = m.id
      where m.id = $1
@@ -151,6 +159,10 @@ export const getMerchantBillingContext = async (merchantId: string) => {
     monthlyTransactions,
     transactionLimit: profile.transaction_limit ?? plan.transactionLimit,
     monthlyPriceInr: Number(profile.monthly_price_inr ?? plan.monthlyPriceInr),
+    setupFeeInr: Number(profile.setup_fee_inr ?? plan.setupFeeInr),
+    setupFeeUsdt: Number(profile.setup_fee_usdt ?? plan.setupFeeUsdt),
+    platformFeePercent: Number(profile.platform_fee_percent ?? plan.platformFeePercent),
+    nonCustodialWalletLimit: profile.non_custodial_wallet_limit ?? plan.nonCustodialWalletLimit,
     billing,
     invoices
   };
@@ -196,7 +208,7 @@ export const assertMerchantCanManageNonCustodialWallets = async (merchantId: str
     throw new AppError(
       403,
       "non_custodial_not_enabled",
-      "Non-custodial wallets stay locked until Premium access and admin approval are active"
+      "Non-custodial wallets stay locked until your plan supports it and admin approval is active"
     );
   }
   return context;
@@ -209,6 +221,9 @@ export const changeSubscriptionPlan = async (
     monthlyPriceInr?: number;
     transactionLimit?: number;
     setupFeeInr?: number;
+    setupFeeUsdt?: number;
+    platformFeePercent?: number;
+    nonCustodialWalletLimit?: number | null;
     status?: string;
     metadata?: Record<string, unknown>;
     actorId?: string;
@@ -217,10 +232,16 @@ export const changeSubscriptionPlan = async (
   const plan = planCatalog[planCode];
   const monthlyPriceInr = overrides?.monthlyPriceInr ?? plan.monthlyPriceInr;
   const transactionLimit = overrides?.transactionLimit ?? plan.transactionLimit;
-  const setupFeeInr = overrides?.setupFeeInr ?? 0;
+  const setupFeeInr = overrides?.setupFeeInr ?? plan.setupFeeInr;
+  const setupFeeUsdt = overrides?.setupFeeUsdt ?? plan.setupFeeUsdt;
+  const platformFeePercent = overrides?.platformFeePercent ?? plan.platformFeePercent;
+  const nonCustodialWalletLimit = overrides?.nonCustodialWalletLimit ?? plan.nonCustodialWalletLimit;
   const status = overrides?.status ?? "active";
   const metadata = JSON.stringify({
     ...(overrides?.metadata ?? {}),
+    platformFeePercent,
+    setupFeeUsdt,
+    nonCustodialWalletLimit,
     updatedBy: overrides?.actorId ?? "system"
   });
   const invoiceNumber = buildInvoiceNumber();
@@ -228,18 +249,35 @@ export const changeSubscriptionPlan = async (
 
   await withTransaction(async (client) => {
     const subscriptionResult = await client.query<{ id: string }>(
-      `insert into subscriptions (merchant_id, plan_code, status, monthly_price_inr, transaction_limit, setup_fee_inr, metadata, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7::jsonb, now())
+      `insert into subscriptions (
+        merchant_id, plan_code, status, monthly_price_inr, transaction_limit, setup_fee_inr, setup_fee_usdt,
+        platform_fee_percent, non_custodial_wallet_limit, metadata, updated_at
+      )
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb, now())
        on conflict (merchant_id) do update set
          plan_code = excluded.plan_code,
          status = excluded.status,
          monthly_price_inr = excluded.monthly_price_inr,
          transaction_limit = excluded.transaction_limit,
          setup_fee_inr = excluded.setup_fee_inr,
+         setup_fee_usdt = excluded.setup_fee_usdt,
+         platform_fee_percent = excluded.platform_fee_percent,
+         non_custodial_wallet_limit = excluded.non_custodial_wallet_limit,
          metadata = excluded.metadata,
          updated_at = now()
        returning id`,
-      [merchantId, planCode, status, monthlyPriceInr, transactionLimit, setupFeeInr, metadata]
+      [
+        merchantId,
+        planCode,
+        status,
+        monthlyPriceInr,
+        transactionLimit,
+        setupFeeInr,
+        setupFeeUsdt,
+        platformFeePercent,
+        nonCustodialWalletLimit,
+        metadata
+      ]
     );
 
     await client.query(
@@ -292,6 +330,9 @@ export const changeSubscriptionPlan = async (
           monthlyPriceInr,
           transactionLimit,
           setupFeeInr,
+          setupFeeUsdt,
+          platformFeePercent,
+          nonCustodialWalletLimit,
           status,
           updatedBy: overrides?.actorId ?? "system"
         })
@@ -302,7 +343,20 @@ export const changeSubscriptionPlan = async (
       await client.query(
         `insert into audit_logs (actor_id, merchant_id, action, payload)
          values ($1,$2,'subscription.updated',$3::jsonb)`,
-        [overrides.actorId, merchantId, JSON.stringify({ planCode, monthlyPriceInr, transactionLimit, setupFeeInr, status })]
+        [
+          overrides.actorId,
+          merchantId,
+          JSON.stringify({
+            planCode,
+            monthlyPriceInr,
+            transactionLimit,
+            setupFeeInr,
+            setupFeeUsdt,
+            platformFeePercent,
+            nonCustodialWalletLimit,
+            status
+          })
+        ]
       );
     }
   });

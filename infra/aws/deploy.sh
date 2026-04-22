@@ -19,6 +19,7 @@ npm run migrate:db
 echo "Building and starting nginx, API, WS, worker, and Redis"
 docker compose build api ws worker
 docker compose up -d redis api ws worker nginx
+docker compose restart nginx
 
 echo "Deployment complete"
 docker compose ps
