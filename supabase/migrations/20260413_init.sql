@@ -9,6 +9,12 @@ create table if not exists merchants (
   custodial_provider text not null default 'binance',
   custodial_enabled boolean not null default true,
   non_custodial_enabled boolean not null default false,
+  accepted_checkout_routes jsonb not null default '[
+    {"asset":"BTC","networks":["BTC"]},
+    {"asset":"ETH","networks":["ERC20"]},
+    {"asset":"USDT","networks":["TRC20","ERC20","SOL"]}
+  ]'::jsonb,
+  default_checkout_route jsonb not null default '{"asset":"BTC","network":"BTC"}'::jsonb,
   webhook_base_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

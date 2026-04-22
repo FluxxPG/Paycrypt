@@ -7,10 +7,14 @@ build
 .env.local
 coverage
 *.log
+logs/
 .DS_Store
 apps/web/.next
 apps/web/out
 apps/api/dist
+apps/ws/dist
 apps/worker/dist
+packages/sdk/dist
+packages/shared/dist
 
 .vercel

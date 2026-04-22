@@ -5,6 +5,7 @@ Paycrypt is a production-oriented crypto payment gateway platform built as a mul
 ## Live deployment
 
 - Frontend: https://paycrypt-web-live.vercel.app
+- Public developer docs: https://paycrypt-web-live.vercel.app/docs
 - API edge: https://d1jm86cy6nqs8t.cloudfront.net
 - Backend origin: http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4000
 - WebSocket origin: http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001
@@ -69,11 +70,12 @@ flowchart LR
 ### Hosted checkout flow
 
 1. Merchant creates a payment intent or payment link through dashboard APIs or API keys.
-2. API stores the payment, pricing quote, network choice, expiry, wallet route, and hosted-checkout metadata.
-3. Buyer lands on `/pay/[id]` and sees supported crypto assets, supported networks, QR code, wallet address, timer, and live state.
-4. Worker services observe custody and chain activity.
-5. Payment state progresses through `payment.created`, `payment.pending`, `payment.confirmed`, or `payment.failed`.
-6. Webhook jobs and settlement jobs are queued and processed asynchronously.
+2. If the request omits `settlementCurrency` and `network`, API resolves the merchant's saved default checkout route first.
+3. API stores the payment, pricing quote, network choice, expiry, wallet route, and hosted-checkout metadata.
+4. Buyer lands on `/pay/[id]` and sees supported network choices for that payment, QR code, wallet address, timer, and live state.
+5. Worker services observe custody and chain activity.
+6. Payment state progresses through `payment.created`, `payment.pending`, `payment.confirmed`, or `payment.failed`.
+7. Webhook jobs and settlement jobs are queued and processed asynchronously.
 
 ### Admin control flow
 
@@ -105,6 +107,7 @@ flowchart LR
 - Feature-gated non-custodial support for TRON, Ethereum, and Solana
 - Super-admin control over merchant eligibility for non-custodial wallets
 - Pricing and subscription gating layered on top of wallet access
+- Merchant-level accepted route settings with a persisted default checkout route
 
 ### Realtime and jobs
 
@@ -243,6 +246,7 @@ Required public build env values:
 
 - `NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net`
 - `NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net`
+- `NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app`
 
 The active frontend deployment is:
 

@@ -246,8 +246,8 @@ dashboardRouter.post("/checkout-preview", async (req, res) => {
   const { amountFiat, fiatCurrency, settlementCurrency, network, description } = req.body as {
     amountFiat: number;
     fiatCurrency?: string;
-    settlementCurrency: string;
-    network: string;
+    settlementCurrency?: string;
+    network?: string;
     description?: string;
   };
 

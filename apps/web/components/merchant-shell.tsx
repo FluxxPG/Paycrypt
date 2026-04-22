@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { Activity, Banknote, CreditCard, FileText, KeyRound, Settings2, ShieldCheck, Wallet } from "lucide-react";
+import { Activity, Banknote, Code2, CreditCard, FileText, KeyRound, Settings2, ShieldCheck, Wallet } from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
 
@@ -27,6 +27,7 @@ const navSections = [
   {
     label: "Developer",
     items: [
+      { href: "/docs", label: "Docs", icon: Code2 },
       { href: "/dashboard/api-keys", label: "API Keys", icon: KeyRound },
       { href: "/dashboard/webhooks", label: "Webhooks", icon: Banknote }
     ]

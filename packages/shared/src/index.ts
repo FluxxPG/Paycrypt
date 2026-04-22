@@ -40,6 +40,52 @@ export const supportedAssets = ["BTC", "ETH", "USDT"] as const;
 export const supportedNetworks = ["BTC", "ERC20", "TRC20", "SOL"] as const;
 export type SupportedAsset = (typeof supportedAssets)[number];
 export type SupportedNetwork = (typeof supportedNetworks)[number];
+export const assetNetworkMatrix = {
+  BTC: ["BTC"],
+  ETH: ["ERC20"],
+  USDT: ["TRC20", "ERC20", "SOL"]
+} as const satisfies Record<SupportedAsset, readonly SupportedNetwork[]>;
+
+export const isNetworkSupportedForAsset = (asset: SupportedAsset, network: SupportedNetwork) =>
+  (assetNetworkMatrix[asset] as readonly SupportedNetwork[]).includes(network);
+
+export const checkoutRouteSchema = z
+  .object({
+    asset: z.enum(supportedAssets),
+    network: z.enum(supportedNetworks)
+  })
+  .refine(({ asset, network }) => isNetworkSupportedForAsset(asset, network), {
+    message: "Network is not supported for the selected asset",
+    path: ["network"]
+  });
+
+const validateRequestedRoute = (
+  value: {
+    settlementCurrency?: SupportedAsset;
+    network?: SupportedNetwork;
+  },
+  ctx: z.RefinementCtx
+) => {
+  const hasAsset = typeof value.settlementCurrency === "string";
+  const hasNetwork = typeof value.network === "string";
+
+  if (hasAsset !== hasNetwork) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "settlementCurrency and network must be provided together or omitted together",
+      path: hasAsset ? ["network"] : ["settlementCurrency"]
+    });
+    return;
+  }
+
+  if (hasAsset && hasNetwork && !isNetworkSupportedForAsset(value.settlementCurrency!, value.network!)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Network is not supported for the selected asset",
+      path: ["network"]
+    });
+  }
+};
 
 export const paymentStatusSchema = z.enum([
   "created",
@@ -53,8 +99,8 @@ export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 export const createPaymentSchema = z.object({
   amountFiat: z.number().positive(),
   fiatCurrency: z.string().default("INR"),
-  settlementCurrency: z.enum(supportedAssets),
-  network: z.enum(supportedNetworks),
+  settlementCurrency: z.enum(supportedAssets).optional(),
+  network: z.enum(supportedNetworks).optional(),
   customerEmail: z.string().email().optional(),
   customerName: z.string().optional(),
   description: z.string().min(3).max(280),
@@ -62,18 +108,18 @@ export const createPaymentSchema = z.object({
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
   expiresInMinutes: z.number().int().min(5).max(180).default(30)
-});
+}).superRefine(validateRequestedRoute);
 
 export const createPaymentLinkSchema = z.object({
   title: z.string().min(3).max(120),
   description: z.string().min(3).max(280),
   amountFiat: z.number().positive(),
   fiatCurrency: z.string().default("INR"),
-  settlementCurrency: z.enum(supportedAssets),
-  network: z.enum(supportedNetworks),
+  settlementCurrency: z.enum(supportedAssets).optional(),
+  network: z.enum(supportedNetworks).optional(),
   successUrl: z.string().url(),
   cancelUrl: z.string().url()
-});
+}).superRefine(validateRequestedRoute);
 
 export const createWebhookEndpointSchema = z.object({
   url: z.string().url(),

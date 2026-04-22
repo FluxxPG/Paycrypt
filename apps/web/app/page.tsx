@@ -42,8 +42,8 @@ export default function HomePage() {
             <Link href="/admin/login" className="glass-soft rounded-2xl px-6 py-3 text-sm text-slate-100">
               Open Admin Command Deck
             </Link>
-            <Link href="/login" className="glass-soft rounded-2xl px-6 py-3 text-sm text-slate-100">
-              View Hosted Checkout
+            <Link href="/docs" className="glass-soft rounded-2xl px-6 py-3 text-sm text-slate-100">
+              Read Developer Docs
             </Link>
           </div>
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -179,13 +179,15 @@ export default function HomePage() {
               <Badge className="glass-soft">Node SDK</Badge>
             </div>
             <div className="mt-6 rounded-2xl bg-slate-950/60 p-5 text-sm text-slate-200">
-              <pre className="whitespace-pre-wrap">{`import { CryptoPay } from "@cryptopay/sdk";
+              <pre className="whitespace-pre-wrap">{`import { createClient } from "@cryptopay/sdk";
 
-const client = new CryptoPay("sk_live_xxx");
+const client = createClient({ secretKey: "sk_live_xxx" });
 const intent = await client.payment.create({
-  amount: 2450,
-  currency: "USDT",
-  network: "TRC20"
+  amountFiat: 2450,
+  fiatCurrency: "INR",
+  description: "Nebula AI annual plan",
+  successUrl: "https://merchant.example/success",
+  cancelUrl: "https://merchant.example/cancel"
 });`}</pre>
             </div>
             <div className="mt-6 flex flex-wrap gap-3 text-xs text-slate-400">
@@ -195,6 +197,9 @@ const intent = await client.payment.create({
                 </span>
               ))}
             </div>
+            <Link href="/docs" className="mt-6 inline-flex items-center gap-2 text-sm text-cyan-200">
+              Open full developer docs <ArrowRight className="h-4 w-4" />
+            </Link>
           </Card>
         </motion.div>
       </section>
