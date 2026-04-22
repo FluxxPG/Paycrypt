@@ -10,6 +10,13 @@ export const authRouter = Router();
 
 authRouter.post("/login", async (req, res) => {
   const { email, password } = req.body as { email: string; password: string };
+  const normalizedEmail = String(email ?? "")
+    .trim()
+    .toLowerCase();
+  const normalizedPassword = String(password ?? "");
+  if (!normalizedEmail || !normalizedPassword) {
+    return sendError(res, 400, "missing_credentials", "Email and password are required");
+  }
   const result = await query<{
     id: string;
     password_hash: string;
@@ -18,11 +25,11 @@ authRouter.post("/login", async (req, res) => {
     must_change_password: boolean;
   }>(
     "select id, password_hash, role, merchant_id, must_change_password from users where email = $1 limit 1",
-    [email]
+    [normalizedEmail]
   );
 
   const user = result.rows[0];
-  if (!user || !(await compareHash(password, user.password_hash))) {
+  if (!user || !(await compareHash(normalizedPassword, user.password_hash))) {
     return sendError(res, 401, "invalid_credentials", "Email or password is incorrect");
   }
 

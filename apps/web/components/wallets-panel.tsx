@@ -39,6 +39,15 @@ type WalletCapabilityResponse = {
   }>;
 };
 
+type BinanceStatus = {
+  connected: boolean;
+  source: "merchant" | "platform";
+  connectedAt: string | null;
+  balances: Array<{ asset: string; free: string; locked: string }>;
+  recentDeposits: Array<{ amount: string; coin: string; address?: string; txId?: string; status?: number }>;
+  error?: string;
+};
+
 const nonCustodialNetworks = ["TRC20", "ERC20", "SOL"];
 
 export const WalletsPanel = () => {
@@ -49,6 +58,8 @@ export const WalletsPanel = () => {
   >([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [binanceStatus, setBinanceStatus] = useState<BinanceStatus | null>(null);
+  const [binanceForm, setBinanceForm] = useState({ apiKey: "", apiSecret: "" });
   const [custodialForm, setCustodialForm] = useState({ asset: "USDT", network: "TRC20" });
   const [nonCustodialForm, setNonCustodialForm] = useState({
     asset: "USDT",
@@ -61,10 +72,14 @@ export const WalletsPanel = () => {
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const loadWallets = async () => {
-    const payload = await apiFetch<WalletCapabilityResponse>("/dashboard/wallets");
+    const [payload, binance] = await Promise.all([
+      apiFetch<WalletCapabilityResponse>("/dashboard/wallets"),
+      apiFetch<BinanceStatus>("/dashboard/wallets/binance")
+    ]);
     setWallets(payload.data);
     setCapabilities(payload.capabilities);
     setCustodialProvisioning(payload.custodialProvisioning);
+    setBinanceStatus(binance);
   };
 
   useEffect(() => {
@@ -127,7 +142,7 @@ export const WalletsPanel = () => {
     }
   };
 
-  if (!wallets || !capabilities) {
+  if (!wallets || !capabilities || !binanceStatus) {
     return <Card>Loading wallet control plane...</Card>;
   }
 
@@ -174,6 +189,64 @@ export const WalletsPanel = () => {
                 </p>
               </div>
               <Wallet className="h-5 w-5 text-cyan-300" />
+            </div>
+            <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-sm text-slate-300">
+              <p>
+                Binance account source:{" "}
+                <span className="font-medium text-white">
+                  {binanceStatus.source === "merchant" ? "Merchant API keys" : "Platform default keys"}
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {binanceStatus.connectedAt
+                  ? `Connected at ${new Date(binanceStatus.connectedAt).toLocaleString()}`
+                  : "No merchant Binance keys connected yet."}
+              </p>
+              {binanceStatus.error ? (
+                <p className="mt-2 text-xs text-rose-300">Binance status warning: {binanceStatus.error}</p>
+              ) : null}
+            </div>
+            <div className="mt-4 grid gap-3">
+              <input
+                value={binanceForm.apiKey}
+                onChange={(event) => setBinanceForm((prev) => ({ ...prev, apiKey: event.target.value }))}
+                placeholder="Merchant Binance API Key"
+                className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+              />
+              <input
+                type="password"
+                value={binanceForm.apiSecret}
+                onChange={(event) => setBinanceForm((prev) => ({ ...prev, apiSecret: event.target.value }))}
+                placeholder="Merchant Binance API Secret"
+                className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() =>
+                    runWalletAction("connect-binance", async () => {
+                      await apiFetch("/dashboard/wallets/binance", {
+                        method: "PUT",
+                        body: JSON.stringify(binanceForm)
+                      });
+                      setBinanceForm({ apiKey: "", apiSecret: "" });
+                    })
+                  }
+                  disabled={busyKey === "connect-binance" || !binanceForm.apiKey || !binanceForm.apiSecret}
+                >
+                  {busyKey === "connect-binance" ? "Connecting Binance..." : "Connect merchant Binance"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    runWalletAction("disconnect-binance", async () => {
+                      await apiFetch("/dashboard/wallets/binance", { method: "DELETE" });
+                    })
+                  }
+                  disabled={busyKey === "disconnect-binance" || binanceStatus.source !== "merchant"}
+                >
+                  {busyKey === "disconnect-binance" ? "Disconnecting..." : "Disconnect merchant Binance"}
+                </Button>
+              </div>
             </div>
             <div className="mt-6 grid gap-3">
               <select
@@ -237,6 +310,37 @@ export const WalletsPanel = () => {
                 Custodial routing is disabled for this merchant right now, so Binance route provisioning is locked.
               </div>
             ) : null}
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                <p className="text-sm text-white">Live Binance balances</p>
+                <div className="mt-3 space-y-2 text-xs text-slate-300">
+                  {binanceStatus.balances.length ? (
+                    binanceStatus.balances.slice(0, 6).map((balance) => (
+                      <p key={balance.asset}>
+                        {balance.asset}: free {Number(balance.free).toFixed(8)} | locked{" "}
+                        {Number(balance.locked).toFixed(8)}
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-slate-500">No non-zero balances reported.</p>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                <p className="text-sm text-white">Recent Binance deposits</p>
+                <div className="mt-3 space-y-2 text-xs text-slate-300">
+                  {binanceStatus.recentDeposits.length ? (
+                    binanceStatus.recentDeposits.slice(0, 6).map((deposit, index) => (
+                      <p key={`${deposit.txId ?? "tx"}-${index}`}>
+                        {deposit.coin} {deposit.amount} {deposit.status === 1 ? "(success)" : "(pending)"}
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-slate-500">No recent deposits reported.</p>
+                  )}
+                </div>
+              </div>
+            </div>
           </Card>
 
           {capabilities.nonCustodialEnabled ? (

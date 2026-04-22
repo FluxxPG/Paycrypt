@@ -207,7 +207,8 @@ export type RealtimeEventName =
   | "payment.created"
   | "payment.pending"
   | "payment.confirmed"
-  | "payment.failed";
+  | "payment.failed"
+  | "payment.expired";
 
 export interface RealtimePaymentEvent {
   type: RealtimeEventName;

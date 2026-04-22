@@ -49,6 +49,7 @@ Provision:
 
 ### Runtime services
 
+- `nginx`
 - `api`
 - `ws`
 - `worker`
@@ -84,10 +85,12 @@ WORKER_NAME=
 
 ```bash
 docker compose build api ws worker
-docker compose up -d api ws worker redis
+docker compose up -d redis api ws worker nginx
 ```
 
-5. Place CloudFront in front of the API and websocket origins.
+5. Route CloudFront/API traffic to the Nginx origin (port 80), which proxies:
+   - `/socket.io/*` -> `ws:4001`
+   - all other routes -> `api:4000`
 
 ## Supabase
 
@@ -97,6 +100,6 @@ docker compose up -d api ws worker redis
 
 ## Production Notes
 
-- No Nginx is required for this stack.
+- Nginx is the public HTTP ingress for API + websocket traffic.
 - Redis 6/7 with Lua support is required for BullMQ.
 - Binance custodial features require real production API credentials.

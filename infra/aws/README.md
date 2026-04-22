@@ -1,11 +1,12 @@
 # AWS EC2 Deployment
 
-This stack does not require Nginx. Front the API and websocket services with an AWS Application Load Balancer, or expose them directly with TLS terminated upstream.
+This stack includes an Nginx reverse proxy container in front of API + websocket services. You can terminate TLS at ALB/CloudFront and forward plain HTTP to Nginx on port 80.
 
 ## Services
 
-- `api` on `4000`
-- `ws` on `4001`
+- `nginx` on `80` (reverse proxy to API + websocket)
+- `api` on `4000` (internal)
+- `ws` on `4001` (internal)
 - `worker` internal only
 - `redis` on `6379` internal only unless you explicitly need remote access
 
@@ -56,7 +57,6 @@ sudo systemctl start cryptopay-compose.service
 
 ## Load balancer guidance
 
-- Route `api.yourdomain.com` to `:4000`
-- Route `ws.yourdomain.com` to `:4001`
+- Route `api.yourdomain.com` (and/or websocket traffic) to Nginx `:80`
 - Keep `6379` and worker access inside the private security group
 - Deploy the frontend separately on Vercel and point it at the ALB URLs

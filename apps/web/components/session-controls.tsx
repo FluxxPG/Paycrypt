@@ -7,6 +7,7 @@ import { Button } from "./ui/button";
 import { apiFetch } from "../lib/authed-fetch";
 import { getApiBaseUrl } from "../lib/runtime-config";
 import { clearAccessToken } from "../lib/session";
+import { loginPathForConsole } from "../lib/roles";
 
 type MeResponse = {
   user: {
@@ -44,7 +45,8 @@ export const SessionControls = () => {
       });
     } finally {
       clearAccessToken();
-      router.replace("/login");
+      const loginPath = actor?.role === "merchant" ? loginPathForConsole("merchant") : loginPathForConsole("admin");
+      router.replace(loginPath);
       router.refresh();
       setBusy(false);
     }

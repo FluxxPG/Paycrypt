@@ -7,7 +7,6 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { apiFetch } from "../lib/authed-fetch";
-import { getApiBaseUrl } from "../lib/runtime-config";
 import { setAccessToken } from "../lib/session";
 import { defaultConsoleForRole, loginPathForConsole, type AppRole } from "../lib/roles";
 
@@ -55,21 +54,13 @@ export const PasswordSetupForm = ({ consoleType }: PasswordSetupFormProps) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/auth/setup-password`, {
+      const payload = await apiFetch<{ accessToken?: string; user?: { role?: AppRole } }>("/auth/setup-password", {
         method: "POST",
-        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          ...(typeof window !== "undefined" && window.localStorage.getItem("cryptopay_access_token")
-            ? { Authorization: `Bearer ${window.localStorage.getItem("cryptopay_access_token")}` }
-            : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ password, confirmPassword })
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payload?.message ?? "Password setup failed");
-      }
       if (payload?.accessToken) {
         setAccessToken(payload.accessToken);
       }

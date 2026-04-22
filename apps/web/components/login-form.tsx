@@ -53,6 +53,10 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
     setError(null);
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || !password) {
+        throw new Error("Email and password are required");
+      }
       const baseUrl = getApiBaseUrl();
 
       const response = await fetch(`${baseUrl}/auth/login`, {
@@ -61,7 +65,7 @@ export const LoginForm = ({ variant = "merchant", onSuccessRedirect }: LoginForm
           "Content-Type": "application/json"
         },
         credentials: "include",
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: normalizedEmail, password })
       });
 
       const raw = await response.text();

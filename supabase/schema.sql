@@ -16,6 +16,9 @@ create table if not exists merchants (
   ]'::jsonb,
   default_checkout_route jsonb not null default '{"asset":"BTC","network":"BTC"}'::jsonb,
   webhook_base_url text,
+  binance_api_key_enc text,
+  binance_api_secret_enc text,
+  binance_connected_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -55,12 +58,10 @@ create table if not exists api_keys (
   created_at timestamptz not null default now()
 );
 
-create index if not exists api_keys_lookup_idx on api_keys(key_prefix, key_type);
-create unique index if not exists api_keys_unique_idx on api_keys(merchant_id, key_type, key_prefix);
-
 create table if not exists wallets (
   id uuid primary key default gen_random_uuid(),
   merchant_id text not null references merchants(id) on delete cascade,
+  payment_id text references payments(id) on delete set null,
   wallet_type text not null check (wallet_type in ('custodial', 'non_custodial')),
   provider text not null,
   asset text not null,
@@ -71,10 +72,6 @@ create table if not exists wallets (
   last_seen_at timestamptz,
   created_at timestamptz not null default now()
 );
-
-create unique index if not exists wallets_unique_idx on wallets(merchant_id, wallet_type, provider, asset, network, address);
-create index if not exists wallets_merchant_created_idx on wallets(merchant_id, created_at desc);
-create index if not exists wallets_payment_lookup_idx on wallets(payment_id, network, address);
 
 create table if not exists subscriptions (
   id uuid primary key default gen_random_uuid(),
@@ -88,8 +85,6 @@ create table if not exists subscriptions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create unique index if not exists subscriptions_merchant_unique_idx on subscriptions(merchant_id);
 
 create table if not exists billing_invoices (
   id uuid primary key default gen_random_uuid(),
@@ -111,9 +106,6 @@ create table if not exists billing_invoices (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create index if not exists billing_invoices_merchant_created_idx on billing_invoices(merchant_id, created_at desc);
-create index if not exists billing_invoices_status_idx on billing_invoices(status);
 
 create table if not exists payments (
   id text primary key,
@@ -141,12 +133,6 @@ create table if not exists payments (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create index if not exists payments_merchant_created_idx on payments(merchant_id, created_at desc);
-create index if not exists payments_status_idx on payments(status);
-
-alter table if exists wallets
-  add column if not exists payment_id text references payments(id) on delete set null;
 
 create table if not exists payment_links (
   id text primary key,
@@ -178,10 +164,6 @@ create table if not exists transactions (
   created_at timestamptz not null default now()
 );
 
-create index if not exists transactions_merchant_created_idx on transactions(merchant_id, created_at desc);
-create unique index if not exists transactions_payment_unique_idx on transactions(payment_id);
-create index if not exists transactions_payment_status_idx on transactions(payment_id, status);
-
 create table if not exists settlements (
   id uuid primary key default gen_random_uuid(),
   merchant_id text not null references merchants(id) on delete cascade,
@@ -200,9 +182,110 @@ create table if not exists settlements (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists webhook_endpoints (
+  id uuid primary key default gen_random_uuid(),
+  merchant_id text not null references merchants(id) on delete cascade,
+  target_url text not null,
+  events text[] not null default '{}',
+  is_active boolean not null default true,
+  secret_hash text not null,
+  secret_ciphertext text not null,
+  secret_version integer not null default 1,
+  last_rotated_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists webhook_logs (
+  id uuid primary key default gen_random_uuid(),
+  merchant_id text not null references merchants(id) on delete cascade,
+  endpoint_id uuid references webhook_endpoints(id) on delete set null,
+  event_type text not null,
+  payload jsonb not null,
+  response_status integer,
+  attempt integer not null default 1,
+  delivered_at timestamptz,
+  next_retry_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists usage_logs (
+  id uuid primary key default gen_random_uuid(),
+  merchant_id text not null references merchants(id) on delete cascade,
+  event_type text not null,
+  quantity integer not null default 1,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  actor_id text not null,
+  merchant_id text references merchants(id) on delete cascade,
+  action text not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists worker_heartbeats (
+  id uuid primary key default gen_random_uuid(),
+  worker_name text not null,
+  status text not null default 'online',
+  last_seen_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create table if not exists non_custodial_wallet_verifications (
+  id uuid primary key default gen_random_uuid(),
+  merchant_id text not null references merchants(id) on delete cascade,
+  wallet_address text not null,
+  asset text not null,
+  network text not null,
+  challenge_message text not null,
+  signature text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  verified_at timestamptz
+);
+
+create table if not exists system_alerts (
+  id uuid primary key default gen_random_uuid(),
+  severity text not null,
+  source text not null,
+  message text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists ws_health (
+  id uuid primary key default gen_random_uuid(),
+  node_id text not null,
+  clients_connected integer not null default 0,
+  latency_ms integer not null default 0,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists api_keys_lookup_idx on api_keys(key_prefix, key_type);
+create unique index if not exists api_keys_unique_idx on api_keys(merchant_id, key_type, key_prefix);
+create unique index if not exists wallets_unique_idx on wallets(merchant_id, wallet_type, provider, asset, network, address);
+create index if not exists wallets_merchant_created_idx on wallets(merchant_id, created_at desc);
+create index if not exists wallets_payment_lookup_idx on wallets(payment_id, network, address);
+create unique index if not exists subscriptions_merchant_unique_idx on subscriptions(merchant_id);
+create index if not exists billing_invoices_merchant_created_idx on billing_invoices(merchant_id, created_at desc);
+create index if not exists billing_invoices_status_idx on billing_invoices(status);
+create index if not exists payments_merchant_created_idx on payments(merchant_id, created_at desc);
+create index if not exists payments_status_idx on payments(status);
+create index if not exists transactions_merchant_created_idx on transactions(merchant_id, created_at desc);
+create unique index if not exists transactions_payment_unique_idx on transactions(payment_id);
+create index if not exists transactions_payment_status_idx on transactions(payment_id, status);
 create unique index if not exists settlements_payment_unique_idx on settlements(payment_id);
 create index if not exists settlements_merchant_created_idx on settlements(merchant_id, created_at desc);
 create index if not exists settlements_payment_status_idx on settlements(payment_id, status);
+create index if not exists usage_logs_merchant_created_idx on usage_logs(merchant_id, created_at desc);
+create unique index if not exists worker_heartbeats_name_idx on worker_heartbeats(worker_name);
+create index if not exists non_custodial_wallet_verifications_idx on non_custodial_wallet_verifications(merchant_id, wallet_address);
+create index if not exists system_alerts_created_idx on system_alerts(created_at desc);
+create unique index if not exists ws_health_node_idx on ws_health(node_id);
 
 create or replace view payment_ledger as
 select
@@ -256,107 +339,81 @@ left join wallets w
  and w.network = p.network
  and w.address = p.wallet_address;
 
-create table if not exists webhook_endpoints (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  target_url text not null,
-  events text[] not null default '{}',
-  is_active boolean not null default true,
-  secret_hash text not null,
-  secret_ciphertext text not null,
-  secret_version integer not null default 1,
-  last_rotated_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists webhook_logs (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  endpoint_id uuid references webhook_endpoints(id) on delete set null,
-  event_type text not null,
-  payload jsonb not null,
-  response_status integer,
-  attempt integer not null default 1,
-  delivered_at timestamptz,
-  next_retry_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists usage_logs (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  event_type text not null,
-  quantity integer not null default 1,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists usage_logs_merchant_created_idx on usage_logs(merchant_id, created_at desc);
-
-create table if not exists audit_logs (
-  id uuid primary key default gen_random_uuid(),
-  actor_id text not null,
-  merchant_id text references merchants(id) on delete cascade,
-  action text not null,
-  payload jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists worker_heartbeats (
-  id uuid primary key default gen_random_uuid(),
-  worker_name text not null,
-  status text not null default 'online',
-  last_seen_at timestamptz not null default now(),
-  metadata jsonb not null default '{}'::jsonb
-);
-
-create unique index if not exists worker_heartbeats_name_idx on worker_heartbeats(worker_name);
-
-create table if not exists non_custodial_wallet_verifications (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  wallet_address text not null,
-  asset text not null,
-  network text not null,
-  challenge_message text not null,
-  signature text,
-  status text not null default 'pending',
-  created_at timestamptz not null default now(),
-  verified_at timestamptz
-);
-
-create index if not exists non_custodial_wallet_verifications_idx on non_custodial_wallet_verifications(merchant_id, wallet_address);
-
-create table if not exists system_alerts (
-  id uuid primary key default gen_random_uuid(),
-  severity text not null,
-  source text not null,
-  message text not null,
-  metadata jsonb not null default '{}'::jsonb,
-  resolved_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists system_alerts_created_idx on system_alerts(created_at desc);
-
-create table if not exists ws_health (
-  id uuid primary key default gen_random_uuid(),
-  node_id text not null,
-  clients_connected integer not null default 0,
-  latency_ms integer not null default 0,
-  last_seen_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
-);
-
-create unique index if not exists ws_health_node_idx on ws_health(node_id);
-
-insert into merchants (id, name, slug, email, non_custodial_enabled)
+insert into merchants (
+  id,
+  name,
+  slug,
+  email,
+  status,
+  custodial_enabled,
+  non_custodial_enabled
+)
 values
-  ('mrc_demo', 'Nebula Commerce', 'nebula-commerce', 'owner@nebula.dev', false),
-  ('mrc_admin', 'Platform Admin', 'platform-admin', 'admin@cryptopay.dev', true)
-on conflict (id) do nothing;
+  ('mrc_demo', 'Demo Merchant', 'demo-merchant', 'owner@nebula.dev', 'active', true, false),
+  ('mrc_admin', 'Platform Admin', 'platform-admin', 'admin@cryptopay.dev', 'active', true, false)
+on conflict (id) do update set
+  name = excluded.name,
+  slug = excluded.slug,
+  email = excluded.email,
+  status = excluded.status,
+  custodial_enabled = excluded.custodial_enabled,
+  non_custodial_enabled = excluded.non_custodial_enabled,
+  updated_at = now();
 
-insert into subscriptions (merchant_id, plan_code, monthly_price_inr, transaction_limit, setup_fee_inr)
+insert into subscriptions (
+  merchant_id,
+  plan_code,
+  status,
+  monthly_price_inr,
+  transaction_limit,
+  setup_fee_inr
+)
 values
-  ('mrc_demo', 'business', 15000, 20000, 0),
-  ('mrc_admin', 'premium', 35000, 100000, 0)
-on conflict do nothing;
+  ('mrc_demo', 'business', 'active', 15000, 20000, 0),
+  ('mrc_admin', 'premium', 'active', 35000, 100000, 0)
+on conflict (merchant_id) do update set
+  plan_code = excluded.plan_code,
+  status = excluded.status,
+  monthly_price_inr = excluded.monthly_price_inr,
+  transaction_limit = excluded.transaction_limit,
+  setup_fee_inr = excluded.setup_fee_inr,
+  updated_at = now();
+
+insert into users (
+  id,
+  merchant_id,
+  full_name,
+  email,
+  password_hash,
+  role,
+  must_change_password,
+  password_setup_completed_at
+)
+values
+  (
+    'usr_demo_owner',
+    'mrc_demo',
+    'Demo Merchant',
+    'owner@nebula.dev',
+    '$2a$12$wJmbsqbGLKS6M1f7Igucsu5YV8COCgPoOID1iCaCHK4dC4d7fji7W',
+    'merchant',
+    false,
+    now()
+  ),
+  (
+    'usr_platform_admin',
+    'mrc_admin',
+    'Platform Admin',
+    'admin@cryptopay.dev',
+    '$2a$12$a1bX6X5G7uCA9Y5XRZ4RVOGg3M9OrjDEkE15aXPdIHyuaWoUC7sza',
+    'super_admin',
+    false,
+    now()
+  )
+on conflict (email) do update set
+  merchant_id = excluded.merchant_id,
+  full_name = excluded.full_name,
+  password_hash = excluded.password_hash,
+  role = excluded.role,
+  must_change_password = excluded.must_change_password,
+  password_setup_completed_at = excluded.password_setup_completed_at;

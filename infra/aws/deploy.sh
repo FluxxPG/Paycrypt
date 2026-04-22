@@ -16,9 +16,9 @@ npm ci
 echo "Running database migrations"
 npm run migrate:db
 
-echo "Building and starting API, WS, worker, and Redis"
+echo "Building and starting nginx, API, WS, worker, and Redis"
 docker compose build api ws worker
-docker compose up -d redis api ws worker
+docker compose up -d redis api ws worker nginx
 
 echo "Deployment complete"
 docker compose ps

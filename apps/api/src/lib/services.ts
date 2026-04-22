@@ -17,7 +17,14 @@ import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import TronWeb from "tronweb";
-import { getBinanceDepositAddress } from "./binance.js";
+import {
+  getBinanceBalances,
+  getBinanceDepositAddress,
+  getBinanceDepositAddressForCredentials,
+  getBinanceDepositHistory,
+  validateBinanceCredentials,
+  type BinanceCredentials
+} from "./binance.js";
 import { nanoid } from "nanoid";
 import { query, withTransaction } from "./db.js";
 import { emitPaymentEvent } from "./realtime.js";
@@ -756,9 +763,23 @@ export const provisionCustodialWallet = async (
   input: { asset: string; network: string }
 ) => {
   await assertMerchantPlatformAccess(merchantId);
+  const merchantCredentialResult = await query<{ binance_api_key_enc: string | null; binance_api_secret_enc: string | null }>(
+    `select binance_api_key_enc, binance_api_secret_enc from merchants where id = $1 limit 1`,
+    [merchantId]
+  );
+  const merchantCredentials =
+    merchantCredentialResult.rows[0]?.binance_api_key_enc && merchantCredentialResult.rows[0]?.binance_api_secret_enc
+      ? {
+          apiKey: decryptSecret(merchantCredentialResult.rows[0].binance_api_key_enc),
+          apiSecret: decryptSecret(merchantCredentialResult.rows[0].binance_api_secret_enc)
+        }
+      : null;
+
   let deposit;
   try {
-    deposit = await getBinanceDepositAddress(input.asset, input.network);
+    deposit = merchantCredentials
+      ? await getBinanceDepositAddressForCredentials(input.asset, input.network, merchantCredentials)
+      : await getBinanceDepositAddress(input.asset, input.network);
   } catch (error) {
     if (error instanceof Error && error.message.includes("Binance API credentials are not configured")) {
       throw new AppError(
@@ -828,6 +849,84 @@ export const provisionCustodialWallet = async (
 
     return result.rows[0];
   });
+};
+
+export const upsertMerchantBinanceCredentials = async (
+  merchantId: string,
+  credentials: BinanceCredentials
+) => {
+  await validateBinanceCredentials(credentials);
+  const encryptedKey = encryptSecret(credentials.apiKey);
+  const encryptedSecret = encryptSecret(credentials.apiSecret);
+  await query(
+    `update merchants
+     set binance_api_key_enc = $2,
+         binance_api_secret_enc = $3,
+         binance_connected_at = now(),
+         updated_at = now()
+     where id = $1`,
+    [merchantId, encryptedKey, encryptedSecret]
+  );
+  return { connected: true };
+};
+
+export const clearMerchantBinanceCredentials = async (merchantId: string) => {
+  await query(
+    `update merchants
+     set binance_api_key_enc = null,
+         binance_api_secret_enc = null,
+         binance_connected_at = null,
+         updated_at = now()
+     where id = $1`,
+    [merchantId]
+  );
+  return { connected: false };
+};
+
+export const getMerchantBinanceStatus = async (merchantId: string) => {
+  const result = await query<{
+    binance_api_key_enc: string | null;
+    binance_api_secret_enc: string | null;
+    binance_connected_at: string | null;
+  }>(
+    `select binance_api_key_enc, binance_api_secret_enc, binance_connected_at
+     from merchants
+     where id = $1
+     limit 1`,
+    [merchantId]
+  );
+  const row = result.rows[0];
+  const merchantCredentials =
+    row?.binance_api_key_enc && row?.binance_api_secret_enc
+      ? {
+          apiKey: decryptSecret(row.binance_api_key_enc),
+          apiSecret: decryptSecret(row.binance_api_secret_enc)
+        }
+      : null;
+  const source = merchantCredentials ? "merchant" : "platform";
+
+  try {
+    const [balances, deposits] = await Promise.all([
+      getBinanceBalances(merchantCredentials ?? undefined),
+      getBinanceDepositHistory(undefined, merchantCredentials ?? undefined)
+    ]);
+    return {
+      connected: Boolean(merchantCredentials),
+      source,
+      connectedAt: row?.binance_connected_at ?? null,
+      balances: balances.filter((entry) => Number(entry.free) > 0 || Number(entry.locked) > 0).slice(0, 12),
+      recentDeposits: deposits.slice(0, 10)
+    };
+  } catch (error) {
+    return {
+      connected: Boolean(merchantCredentials),
+      source,
+      connectedAt: row?.binance_connected_at ?? null,
+      balances: [],
+      recentDeposits: [],
+      error: error instanceof Error ? error.message : "Failed to load Binance account status"
+    };
+  }
 };
 
 export const updateWalletForMerchant = async (

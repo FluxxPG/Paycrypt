@@ -30,15 +30,23 @@ export const requireJwt = async (req: AuthenticatedRequest, res: Response, next:
   try {
     const token = header.replace("Bearer ", "");
     const payload = verifyAccessToken(token);
-    const userResult = await query<{ must_change_password: boolean }>(
-      "select must_change_password from users where id = $1 limit 1",
+    const userResult = await query<{
+      merchant_id: string;
+      role: "merchant" | "admin" | "super_admin";
+      must_change_password: boolean;
+    }>(
+      "select merchant_id, role, must_change_password from users where id = $1 limit 1",
       [payload.sub]
     );
+    const user = userResult.rows[0];
+    if (!user) {
+      return sendError(res, 401, "unauthorized", "Invalid or expired access token");
+    }
     req.actor = {
       userId: payload.sub,
-      merchantId: payload.merchantId,
-      role: payload.role,
-      requiresPasswordSetup: Boolean(userResult.rows[0]?.must_change_password)
+      merchantId: user.merchant_id,
+      role: user.role,
+      requiresPasswordSetup: Boolean(user.must_change_password)
     };
     void recordAuthResult("jwt", true).catch((error) => console.error("Failed to record JWT auth telemetry", error));
     next();

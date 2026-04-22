@@ -45,7 +45,7 @@ export class CryptoPayClient {
   };
 
   constructor(private readonly options: CryptoPayClientOptions) {
-    this.baseUrl = options.baseUrl ?? "https://api.example.com";
+    this.baseUrl = options.baseUrl ?? "http://localhost:4000";
     this.fetcher = options.fetcher ?? fetch;
   }
 

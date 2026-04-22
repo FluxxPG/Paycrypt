@@ -26,7 +26,10 @@ import {
   rotateWebhookEndpointSecret,
   updateMerchantCheckoutSettings,
   updateWalletForMerchant,
-  updateMerchantSubscription
+  updateMerchantSubscription,
+  upsertMerchantBinanceCredentials,
+  clearMerchantBinanceCredentials,
+  getMerchantBinanceStatus
 } from "../lib/services.js";
 import { getMerchantBillingContext } from "../lib/billing.js";
 import { supportedAssets, supportedNetworks } from "@cryptopay/shared";
@@ -291,6 +294,31 @@ dashboardRouter.get("/wallets", async (req, res) => {
       }))
     )
   });
+});
+
+dashboardRouter.get("/wallets/binance", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await getMerchantBinanceStatus(merchantId);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.put("/wallets/binance", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { apiKey, apiSecret } = req.body as { apiKey: string; apiSecret: string };
+  if (!apiKey || !apiSecret) {
+    return res.status(400).json({ message: "apiKey and apiSecret are required" });
+  }
+  const responsePayload = await upsertMerchantBinanceCredentials(merchantId, { apiKey, apiSecret });
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
+});
+
+dashboardRouter.delete("/wallets/binance", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const responsePayload = await clearMerchantBinanceCredentials(merchantId);
+  res.locals.responsePayload = responsePayload;
+  res.json(responsePayload);
 });
 
 dashboardRouter.post("/wallets", async (req, res) => {

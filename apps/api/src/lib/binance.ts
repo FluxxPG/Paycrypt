@@ -14,10 +14,21 @@ type BinanceBalance = {
   locked: string;
 };
 
+export type BinanceCredentials = {
+  apiKey: string;
+  apiSecret: string;
+};
+
 const baseUrl = env.BINANCE_BASE_URL ?? "https://api.binance.com";
 
-const signedRequest = async <T>(path: string, params: Record<string, string | number | undefined>) => {
-  if (!env.BINANCE_API_KEY || !env.BINANCE_API_SECRET) {
+const signedRequest = async <T>(
+  path: string,
+  params: Record<string, string | number | undefined>,
+  credentials?: BinanceCredentials
+) => {
+  const apiKey = credentials?.apiKey ?? env.BINANCE_API_KEY;
+  const apiSecret = credentials?.apiSecret ?? env.BINANCE_API_SECRET;
+  if (!apiKey || !apiSecret) {
     throw new Error("Binance API credentials are not configured");
   }
 
@@ -28,12 +39,12 @@ const signedRequest = async <T>(path: string, params: Record<string, string | nu
     }
   });
   query.append("timestamp", String(Date.now()));
-  const signature = crypto.createHmac("sha256", env.BINANCE_API_SECRET).update(query.toString()).digest("hex");
+  const signature = crypto.createHmac("sha256", apiSecret).update(query.toString()).digest("hex");
   query.append("signature", signature);
 
   const response = await fetch(`${baseUrl}${path}?${query.toString()}`, {
     headers: {
-      "X-MBX-APIKEY": env.BINANCE_API_KEY
+      "X-MBX-APIKEY": apiKey
     }
   });
 
@@ -57,18 +68,36 @@ export const getBinanceDepositAddress = async (asset: string, network: string): 
   return signedRequest<BinanceDepositAddress>("/sapi/v1/capital/deposit/address", {
     coin: asset,
     network: binanceNetwork
-  });
+  }, undefined);
 };
 
-export const getBinanceBalances = async () => {
-  const response = await signedRequest<{ balances: BinanceBalance[] }>("/sapi/v3/asset/getUserAsset", {});
+export const getBinanceDepositAddressForCredentials = async (
+  asset: string,
+  network: string,
+  credentials: BinanceCredentials
+): Promise<BinanceDepositAddress> => {
+  const binanceNetwork = networkMap[network] ?? network;
+  return signedRequest<BinanceDepositAddress>("/sapi/v1/capital/deposit/address", {
+    coin: asset,
+    network: binanceNetwork
+  }, credentials);
+};
+
+export const getBinanceBalances = async (credentials?: BinanceCredentials) => {
+  const response = await signedRequest<{ balances: BinanceBalance[] }>("/sapi/v3/asset/getUserAsset", {}, credentials);
   return response.balances ?? [];
 };
 
-export const getBinanceDepositHistory = async (asset?: string) => {
+export const getBinanceDepositHistory = async (asset?: string, credentials?: BinanceCredentials) => {
   const response = await signedRequest<Array<{ amount: string; coin: string; address?: string; txId?: string; status?: number }>>(
     "/sapi/v1/capital/deposit/hisrec",
     asset ? { coin: asset } : {}
+    ,
+    credentials
   );
   return response ?? [];
+};
+
+export const validateBinanceCredentials = async (credentials: BinanceCredentials) => {
+  await signedRequest("/sapi/v3/asset/getUserAsset", {}, credentials);
 };
