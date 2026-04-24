@@ -9,6 +9,8 @@ import {
   listSettlements,
   listTransactions
 } from "../lib/services.js";
+import { upiPaymentService } from "../lib/upi-services.js";
+import { createUpiPaymentSchema } from "@cryptopay/shared";
 import {
   idempotencyGuard,
   redisRateLimit,
@@ -26,9 +28,19 @@ apiPlatformRouter.use(
 
 apiPlatformRouter.post("/payments", scopeGuard("payments:write"), async (req, res) => {
   const merchantId = (req as any).apiKey.merchantId;
-  const responsePayload = await createPaymentIntent(merchantId, req.body);
-  res.locals.responsePayload = responsePayload;
-  res.status(201).json(responsePayload);
+  
+  // Check if this is a UPI payment
+  if (req.body.method === "upi") {
+    const validatedData = createUpiPaymentSchema.parse(req.body);
+    const responsePayload = await upiPaymentService.createPaymentIntent(merchantId, validatedData);
+    res.locals.responsePayload = responsePayload;
+    res.status(201).json(responsePayload);
+  } else {
+    // Default crypto payment flow
+    const responsePayload = await createPaymentIntent(merchantId, req.body);
+    res.locals.responsePayload = responsePayload;
+    res.status(201).json(responsePayload);
+  }
 });
 
 apiPlatformRouter.get("/payments/:id", scopeGuard("payments:read"), async (req, res) => {

@@ -31,6 +31,7 @@ import {
   clearMerchantBinanceCredentials,
   getMerchantBinanceStatus
 } from "../lib/services.js";
+import { upiPaymentService } from "../lib/upi-services.js";
 import { getMerchantBillingContext } from "../lib/billing.js";
 import { supportedAssets, supportedNetworks } from "@cryptopay/shared";
 
@@ -301,6 +302,38 @@ dashboardRouter.post("/checkout-preview/non-custodial", async (req, res) => {
     { walletPreference: "non_custodial_only" }
   );
 
+  res.locals.responsePayload = responsePayload;
+  res.status(201).json(responsePayload);
+});
+
+dashboardRouter.post("/checkout-preview/upi", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const { amountFiat, fiatCurrency, description, provider } = req.body as {
+    amountFiat?: number;
+    fiatCurrency?: string;
+    description?: string;
+    provider?: "auto" | "phonepe" | "paytm" | "razorpay" | "freecharge";
+  };
+  const merchantAmountResult = await query<{ upi_default_amount_fiat: string }>(
+    `select upi_default_amount_fiat from merchants where id = $1 limit 1`,
+    [merchantId]
+  );
+  const resolvedAmount = amountFiat ?? Number(merchantAmountResult.rows[0]?.upi_default_amount_fiat ?? 999);
+  const responsePayload = await upiPaymentService.createPaymentIntent(merchantId, {
+    amountFiat: resolvedAmount,
+    fiatCurrency: fiatCurrency ?? "INR",
+    method: "upi",
+    provider: provider ?? "auto",
+    description: description ?? "UPI checkout preview",
+    expiresInMinutes: 30,
+    successUrl: `${process.env.APP_BASE_URL}/preview/success`,
+    cancelUrl: `${process.env.APP_BASE_URL}/preview/cancel`,
+    metadata: {
+      preview: "true",
+      source: "merchant_settings",
+      previewMode: "upi"
+    }
+  });
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
 });

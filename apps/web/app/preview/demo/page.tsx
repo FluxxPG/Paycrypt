@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { HostedCheckoutPanel } from "../../../components/hosted-checkout-panel";
+import { UPICheckoutPanel } from "../../../components/upi-checkout-panel";
 import { Button } from "../../../components/ui/button";
 import { Card } from "../../../components/ui/card";
 
@@ -38,15 +39,41 @@ const buildDemoPayment = (status: DemoStatus) => ({
   cancel_url: "/preview/cancel"
 });
 
+const buildDemoUpiPayment = (status: DemoStatus) => ({
+  id: "upi_demo_preview",
+  merchant_id: "mrc_demo",
+  amount_fiat: 999,
+  fiat_currency: "INR",
+  payment_method: "upi" as const,
+  upi_provider: "phonepe",
+  upi_transaction_id: "upi_demo_tx_1",
+  upi_intent_url: "upi://pay?pa=merchant@upi&pn=Paycrypt%20Demo&am=999&cu=INR&tn=Demo%20UPI%20payment",
+  upi_qr_code: "upi://pay?pa=merchant@upi&pn=Paycrypt%20Demo&am=999&cu=INR&tn=Demo%20UPI%20payment",
+  upi_status: status === "confirmed" ? "success" : status === "failed" ? "failed" : "pending",
+  description: "Demo UPI checkout preview (prefilled amount)",
+  status,
+  expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  success_url: "/preview/success",
+  cancel_url: "/preview/cancel"
+});
+
 export default function DemoPreviewPage() {
   const [status, setStatus] = useState<DemoStatus>("created");
+  const [method, setMethod] = useState<"crypto" | "upi">("crypto");
   const payment = useMemo(() => buildDemoPayment(status), [status]);
+  const upiPayment = useMemo(() => buildDemoUpiPayment(status), [status]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-12">
       <div className="w-full space-y-4">
         <Card className="p-4">
           <div className="flex flex-wrap items-center gap-3">
+            <Button variant={method === "crypto" ? "default" : "secondary"} onClick={() => setMethod("crypto")}>
+              Crypto demo
+            </Button>
+            <Button variant={method === "upi" ? "default" : "secondary"} onClick={() => setMethod("upi")}>
+              UPI demo
+            </Button>
             <Button variant="secondary" onClick={() => setStatus("created")} disabled={status === "created"}>
               Set created
             </Button>
@@ -76,7 +103,7 @@ export default function DemoPreviewPage() {
             </Link>
           </div>
         </Card>
-        <HostedCheckoutPanel payment={payment as any} />
+        {method === "crypto" ? <HostedCheckoutPanel payment={payment as any} /> : <UPICheckoutPanel payment={upiPayment as any} />}
       </div>
     </main>
   );

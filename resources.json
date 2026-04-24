@@ -1,0 +1,46 @@
+﻿{
+    "ResourceIdentifiers": [
+        {
+            "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:security-group/sg-0bdf4cd9390679316",
+            "ResourceType": "AWS::EC2::SecurityGroup"
+        },
+        {
+            "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:instance/i-081269a28e4be24be",
+            "ResourceType": "AWS::EC2::Instance"
+        },
+        {
+            "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:volume/vol-0886be996e03ec497",
+            "ResourceType": "AWS::EC2::Volume"
+        },
+        {
+            "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:key-pair/key-0e7654fdab4a69513",
+            "ResourceType": "AWS::EC2::KeyPair"
+        }
+    ],
+    "Resources": [
+        {
+            "Identifier": {
+                "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:security-group/sg-0bdf4cd9390679316",
+                "ResourceType": "AWS::EC2::SecurityGroup"
+            }
+        },
+        {
+            "Identifier": {
+                "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:instance/i-081269a28e4be24be",
+                "ResourceType": "AWS::EC2::Instance"
+            }
+        },
+        {
+            "Identifier": {
+                "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:volume/vol-0886be996e03ec497",
+                "ResourceType": "AWS::EC2::Volume"
+            }
+        },
+        {
+            "Identifier": {
+                "ResourceArn": "arn:aws:ec2:ap-south-1:359924468730:key-pair/key-0e7654fdab4a69513",
+                "ResourceType": "AWS::EC2::KeyPair"
+            }
+        }
+    ]
+}

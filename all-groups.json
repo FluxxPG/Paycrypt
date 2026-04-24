@@ -1,0 +1,30 @@
+﻿{
+    "GroupIdentifiers": [
+        {
+            "GroupName": "AWS_AppRegistry_AppTag_359924468730-paycrypt",
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/AWS_AppRegistry_AppTag_359924468730-paycrypt"
+        },
+        {
+            "GroupName": "AWS_AppRegistry_Application-paycrypt",
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/AWS_AppRegistry_Application-paycrypt"
+        },
+        {
+            "GroupName": "paycrypt/0c6uu6nk22io3nnzyl7ncc1egg",
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+        }
+    ],
+    "Groups": [
+        {
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/AWS_AppRegistry_AppTag_359924468730-paycrypt",
+            "Name": "AWS_AppRegistry_AppTag_359924468730-paycrypt"
+        },
+        {
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/AWS_AppRegistry_Application-paycrypt",
+            "Name": "AWS_AppRegistry_Application-paycrypt"
+        },
+        {
+            "GroupArn": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg",
+            "Name": "paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+        }
+    ]
+}

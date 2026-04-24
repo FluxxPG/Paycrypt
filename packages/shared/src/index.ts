@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./upi-types.js";
 
 export const planCatalog = {
   starter: {

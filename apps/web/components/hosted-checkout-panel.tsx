@@ -148,8 +148,6 @@ export const HostedCheckoutPanel = ({ payment }: { payment: CheckoutPayment }) =
             paymentId={payment.id}
             merchantId={payment.merchant_id}
             initialStatus={payment.status}
-            successUrl={payment.success_url}
-            cancelUrl={payment.cancel_url}
           />
           <span>Real-time payment updates are active.</span>
         </div>

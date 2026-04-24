@@ -1,15 +1,5 @@
 create extension if not exists "pgcrypto";
 
-create or replace function update_updated_at_column()
-returns trigger as $$
-begin
-  if to_jsonb(new) ? 'updated_at' then
-    new := jsonb_populate_record(new, jsonb_build_object('updated_at', now()));
-  end if;
-  return new;
-end;
-$$ language plpgsql;
-
 create table if not exists merchants (
   id text primary key,
   name text not null,
@@ -29,11 +19,6 @@ create table if not exists merchants (
   binance_api_key_enc text,
   binance_api_secret_enc text,
   binance_connected_at timestamptz,
-  upi_default_amount_fiat numeric(18,2) not null default 999,
-  crypto_default_amount_fiat numeric(18,2) not null default 2499,
-  upi_manual_vpa text,
-  upi_manual_qr_url text,
-  upi_manual_mode_enabled boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -76,7 +61,7 @@ create table if not exists api_keys (
 create table if not exists wallets (
   id uuid primary key default gen_random_uuid(),
   merchant_id text not null references merchants(id) on delete cascade,
-  payment_id text,
+  payment_id text references payments(id) on delete set null,
   wallet_type text not null check (wallet_type in ('custodial', 'non_custodial')),
   provider text not null,
   asset text not null,
@@ -99,8 +84,6 @@ create table if not exists subscriptions (
   setup_fee_usdt numeric(18,2) not null default 0,
   platform_fee_percent numeric(5,2) not null default 1,
   non_custodial_wallet_limit integer not null default 0,
-  upi_enabled boolean not null default false,
-  upi_provider_limit integer not null default 0,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -138,14 +121,6 @@ create table if not exists payments (
   fiat_currency text not null,
   settlement_currency text not null,
   network text not null,
-  payment_method text not null default 'crypto' check (payment_method in ('crypto', 'upi')),
-  upi_provider text,
-  upi_transaction_id text,
-  upi_intent_url text,
-  upi_qr_code text,
-  upi_status text,
-  provider_response jsonb not null default '{}'::jsonb,
-  transaction_id text,
   customer_email text,
   customer_name text,
   description text not null,
@@ -161,45 +136,6 @@ create table if not exists payments (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'wallets_payment_id_fkey'
-  ) then
-    alter table wallets
-      add constraint wallets_payment_id_fkey
-      foreign key (payment_id) references payments(id) on delete set null;
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'subscriptions_non_custodial_wallet_limit_check'
-  ) then
-    alter table subscriptions
-      add constraint subscriptions_non_custodial_wallet_limit_check
-      check (non_custodial_wallet_limit >= -1);
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'subscriptions_upi_provider_limit_check'
-  ) then
-    alter table subscriptions
-      add constraint subscriptions_upi_provider_limit_check
-      check (upi_provider_limit >= -1);
-  end if;
-end $$;
 
 create table if not exists payment_links (
   id text primary key,
@@ -275,92 +211,6 @@ create table if not exists webhook_logs (
   created_at timestamptz not null default now()
 );
 
-create table if not exists merchant_upi_settings (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null unique references merchants(id) on delete cascade,
-  upi_enabled boolean not null default false,
-  auto_routing_enabled boolean not null default true,
-  fallback_to_manual boolean not null default false,
-  allowed_providers text[] not null default array['phonepe','paytm','razorpay','freecharge'],
-  provider_priority jsonb not null default '{"phonepe":1,"paytm":2,"razorpay":3,"freecharge":4}'::jsonb,
-  webhook_secret_encrypted text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists upi_providers (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  provider_name text not null check (provider_name in ('phonepe', 'paytm', 'razorpay', 'freecharge')),
-  api_key_encrypted text not null,
-  secret_key_encrypted text not null,
-  environment text not null default 'test' check (environment in ('test', 'production')),
-  priority integer not null default 1,
-  is_active boolean not null default true,
-  is_tested boolean not null default false,
-  test_status text,
-  last_tested_at timestamptz,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (merchant_id, provider_name)
-);
-
-create table if not exists upi_webhook_logs (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  provider_name text not null,
-  event_id text not null,
-  event_type text not null,
-  payload jsonb not null default '{}'::jsonb,
-  normalized_payload jsonb not null default '{}'::jsonb,
-  status text not null default 'received',
-  created_at timestamptz not null default now()
-);
-
-alter table if exists upi_webhook_logs
-  add column if not exists event_id text;
-
-update upi_webhook_logs
-set event_id = coalesce(
-  nullif(event_id, ''),
-  payload ->> 'eventId',
-  payload ->> 'event_id',
-  payload ->> 'id',
-  encode(digest(provider_name || ':' || payload::text, 'sha256'), 'hex')
-)
-where event_id is null or event_id = '';
-
-alter table if exists upi_webhook_logs
-  alter column event_id set not null;
-
-create table if not exists platform_connections (
-  id uuid primary key default gen_random_uuid(),
-  merchant_id text not null references merchants(id) on delete cascade,
-  platform text not null check (platform in ('shopify', 'woocommerce', 'wordpress', 'opencart')),
-  store_domain text not null,
-  store_name text not null,
-  external_store_id text not null,
-  status text not null default 'pending' check (status in ('pending', 'connected', 'syncing', 'error', 'disconnected', 'suspended')),
-  capabilities jsonb not null default '{}'::jsonb,
-  metadata jsonb not null default '{}'::jsonb,
-  last_sync_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (merchant_id, platform, store_domain)
-);
-
-create table if not exists integration_sync_logs (
-  id uuid primary key default gen_random_uuid(),
-  connection_id uuid not null references platform_connections(id) on delete cascade,
-  merchant_id text not null references merchants(id) on delete cascade,
-  event_type text not null,
-  status text not null default 'success' check (status in ('success', 'failed', 'pending')),
-  message text,
-  payload jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-
 create table if not exists usage_logs (
   id uuid primary key default gen_random_uuid(),
   merchant_id text not null references merchants(id) on delete cascade,
@@ -428,9 +278,6 @@ create index if not exists billing_invoices_merchant_created_idx on billing_invo
 create index if not exists billing_invoices_status_idx on billing_invoices(status);
 create index if not exists payments_merchant_created_idx on payments(merchant_id, created_at desc);
 create index if not exists payments_status_idx on payments(status);
-create index if not exists payments_method_created_idx on payments(payment_method, created_at desc);
-create index if not exists payments_upi_provider_idx on payments(upi_provider, created_at desc);
-create index if not exists payments_upi_transaction_idx on payments(upi_transaction_id);
 create index if not exists transactions_merchant_created_idx on transactions(merchant_id, created_at desc);
 create unique index if not exists transactions_payment_unique_idx on transactions(payment_id);
 create index if not exists transactions_payment_status_idx on transactions(payment_id, status);
@@ -442,16 +289,8 @@ create unique index if not exists worker_heartbeats_name_idx on worker_heartbeat
 create index if not exists non_custodial_wallet_verifications_idx on non_custodial_wallet_verifications(merchant_id, wallet_address);
 create index if not exists system_alerts_created_idx on system_alerts(created_at desc);
 create unique index if not exists ws_health_node_idx on ws_health(node_id);
-create index if not exists upi_providers_merchant_active_idx on upi_providers(merchant_id, is_active, priority);
-create index if not exists upi_webhook_logs_merchant_created_idx on upi_webhook_logs(merchant_id, created_at desc);
-create unique index if not exists upi_webhook_logs_dedupe_idx on upi_webhook_logs(merchant_id, provider_name, event_id);
-create index if not exists platform_connections_merchant_idx on platform_connections(merchant_id, updated_at desc);
-create index if not exists platform_connections_platform_status_idx on platform_connections(platform, status, updated_at desc);
-create index if not exists integration_sync_logs_connection_idx on integration_sync_logs(connection_id, created_at desc);
 
-drop view if exists payment_ledger;
-
-create view payment_ledger as
+create or replace view payment_ledger as
 select
   p.id,
   p.merchant_id,
@@ -460,9 +299,6 @@ select
   coalesce(t.amount_crypto, p.amount_crypto) as received_amount_crypto,
   p.exchange_rate,
   p.fiat_currency,
-  p.payment_method,
-  p.upi_provider,
-  p.upi_transaction_id,
   p.settlement_currency,
   p.network,
   p.customer_email,
@@ -536,13 +372,11 @@ insert into subscriptions (
   setup_fee_inr,
   setup_fee_usdt,
   platform_fee_percent,
-  non_custodial_wallet_limit,
-  upi_enabled,
-  upi_provider_limit
+  non_custodial_wallet_limit
 )
 values
-  ('mrc_demo', 'starter', 'active', 0, 5000, 0, 0, 1, 0, false, 0),
-  ('mrc_admin', 'custom_selective', 'active', 0, 20000, 0, 0, 2, 1, true, 1)
+  ('mrc_demo', 'starter', 'active', 0, 5000, 0, 0, 1, 0),
+  ('mrc_admin', 'custom_selective', 'active', 0, 20000, 0, 0, 2, 1)
 on conflict (merchant_id) do update set
   plan_code = excluded.plan_code,
   status = excluded.status,
@@ -552,8 +386,6 @@ on conflict (merchant_id) do update set
   setup_fee_usdt = excluded.setup_fee_usdt,
   platform_fee_percent = excluded.platform_fee_percent,
   non_custodial_wallet_limit = excluded.non_custodial_wallet_limit,
-  upi_enabled = excluded.upi_enabled,
-  upi_provider_limit = excluded.upi_provider_limit,
   updated_at = now();
 
 insert into users (

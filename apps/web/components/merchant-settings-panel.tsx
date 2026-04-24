@@ -71,7 +71,7 @@ export const MerchantSettingsPanel = () => {
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [selectedRoutes, setSelectedRoutes] = useState<Record<string, string[]>>({});
   const [selectedDefaultRouteKey, setSelectedDefaultRouteKey] = useState("");
-  const [previewMode, setPreviewMode] = useState<"default" | "override" | "non_custodial" | "demo">("default");
+  const [previewMode, setPreviewMode] = useState<"default" | "override" | "non_custodial" | "upi" | "demo">("default");
   const [previewForm, setPreviewForm] = useState({
     amountFiat: 2499,
     fiatCurrency: "INR",
@@ -243,7 +243,11 @@ export const MerchantSettingsPanel = () => {
         setPreviewCheckoutUrl("/preview/demo");
       } else {
         const endpoint =
-          previewMode === "non_custodial" ? "/dashboard/checkout-preview/non-custodial" : "/dashboard/checkout-preview";
+          previewMode === "non_custodial"
+            ? "/dashboard/checkout-preview/non-custodial"
+            : previewMode === "upi"
+              ? "/dashboard/checkout-preview/upi"
+              : "/dashboard/checkout-preview";
         const payload = await apiFetch<PreviewPayload>(endpoint, {
           method: "POST",
           body: JSON.stringify({
@@ -431,6 +435,17 @@ export const MerchantSettingsPanel = () => {
                 }`}
               >
                 Demo preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewMode("upi")}
+                className={`rounded-full px-4 py-2 text-sm transition ${
+                  previewMode === "upi"
+                    ? "bg-cyan-400 text-slate-950"
+                    : "border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                }`}
+              >
+                UPI preview
               </button>
             </div>
 

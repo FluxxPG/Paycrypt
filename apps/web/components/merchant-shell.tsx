@@ -3,9 +3,31 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { Activity, Banknote, Code2, CreditCard, FileText, KeyRound, Settings2, ShieldCheck, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  Banknote,
+  Code2,
+  Link2,
+  CreditCard,
+  FileText,
+  KeyRound,
+  Settings2,
+  ShieldCheck,
+  Smartphone,
+  Wallet,
+  type LucideIcon
+} from "lucide-react";
 import { SessionControls } from "./session-controls";
 import { Badge } from "./ui/badge";
+import { apiFetch } from "../lib/authed-fetch";
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  requiresUpi?: boolean;
+};
 
 const navSections = [
   {
@@ -13,7 +35,9 @@ const navSections = [
     items: [
       { href: "/dashboard", label: "Overview", icon: Activity },
       { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
-      { href: "/dashboard/wallets", label: "Wallets", icon: Wallet }
+      { href: "/dashboard/wallets", label: "Wallets", icon: Wallet },
+      { href: "/dashboard/upi", label: "UPI", icon: Smartphone, requiresUpi: true },
+      { href: "/dashboard/integrations", label: "Integrations", icon: Link2 }
     ]
   },
   {
@@ -56,6 +80,22 @@ export const MerchantShell = ({
   children: ReactNode;
 }) => {
   const pathname = usePathname();
+  const [upiEntitled, setUpiEntitled] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ upiEntitled?: boolean }>("/upi/settings")
+      .then((payload) => setUpiEntitled(Boolean(payload.upiEntitled)))
+      .catch(() => setUpiEntitled(false));
+  }, []);
+
+  const visibleNavSections = useMemo(
+    () =>
+      navSections.map((section) => ({
+        ...section,
+        items: section.items.filter((item: NavItem) => !item.requiresUpi || upiEntitled)
+      })),
+    [upiEntitled]
+  );
 
   return (
     <div className="min-h-screen">
@@ -63,7 +103,7 @@ export const MerchantShell = ({
         <aside className="glass hidden min-h-screen w-72 flex-col gap-8 px-6 py-8 lg:flex">
           <Brand />
           <div className="space-y-6">
-            {navSections.map((section) => (
+            {visibleNavSections.map((section) => (
               <div key={section.label}>
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{section.label}</p>
                 <div className="mt-3 space-y-2">
@@ -111,7 +151,7 @@ export const MerchantShell = ({
 
           <div className="border-b border-white/5 bg-slate-950/40 px-6 py-4 lg:hidden">
             <div className="flex gap-2 overflow-x-auto pb-2">
-              {navSections.flatMap((section) => section.items).map((item) => {
+              {visibleNavSections.flatMap((section) => section.items).map((item) => {
                 const active = pathname === item.href;
                 const Icon = item.icon;
                 return (

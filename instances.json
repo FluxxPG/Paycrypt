@@ -1,0 +1,168 @@
+﻿{
+    "Reservations": [
+        {
+            "ReservationId": "r-0997fa5f99fe1200a",
+            "OwnerId": "359924468730",
+            "Groups": [],
+            "Instances": [
+                {
+                    "Architecture": "x86_64",
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": "/dev/sda1",
+                            "Ebs": {
+                                "AttachTime": "2026-04-22T07:27:12+00:00",
+                                "DeleteOnTermination": true,
+                                "Status": "attached",
+                                "VolumeId": "vol-0886be996e03ec497",
+                                "EbsCardIndex": 0
+                            }
+                        }
+                    ],
+                    "ClientToken": "12ca5d97-2e9a-4e8f-ae7f-4a893e960d8b",
+                    "EbsOptimized": false,
+                    "EnaSupport": true,
+                    "Hypervisor": "xen",
+                    "NetworkInterfaces": [
+                        {
+                            "Association": {
+                                "IpOwnerId": "amazon",
+                                "PublicDnsName": "ec2-65-2-34-31.ap-south-1.compute.amazonaws.com",
+                                "PublicIp": "65.2.34.31"
+                            },
+                            "Attachment": {
+                                "AttachTime": "2026-04-22T07:27:12+00:00",
+                                "AttachmentId": "eni-attach-0d53903a3c78f59ff",
+                                "DeleteOnTermination": true,
+                                "DeviceIndex": 0,
+                                "Status": "attached",
+                                "NetworkCardIndex": 0
+                            },
+                            "Description": "",
+                            "Groups": [
+                                {
+                                    "GroupId": "sg-0bdf4cd9390679316",
+                                    "GroupName": "paycrypt-backend-sg"
+                                }
+                            ],
+                            "Ipv6Addresses": [],
+                            "MacAddress": "02:e2:bb:6e:bc:6d",
+                            "NetworkInterfaceId": "eni-0d7942252c8617f0b",
+                            "OwnerId": "359924468730",
+                            "PrivateDnsName": "ip-172-31-41-59.ap-south-1.compute.internal",
+                            "PrivateIpAddress": "172.31.41.59",
+                            "PrivateIpAddresses": [
+                                {
+                                    "Association": {
+                                        "IpOwnerId": "amazon",
+                                        "PublicDnsName": "ec2-65-2-34-31.ap-south-1.compute.amazonaws.com",
+                                        "PublicIp": "65.2.34.31"
+                                    },
+                                    "Primary": true,
+                                    "PrivateDnsName": "ip-172-31-41-59.ap-south-1.compute.internal",
+                                    "PrivateIpAddress": "172.31.41.59"
+                                }
+                            ],
+                            "SourceDestCheck": true,
+                            "Status": "in-use",
+                            "SubnetId": "subnet-011ea83bf29e90289",
+                            "VpcId": "vpc-09f7e74621dcfb217",
+                            "InterfaceType": "interface",
+                            "Operator": {
+                                "Managed": false
+                            }
+                        }
+                    ],
+                    "RootDeviceName": "/dev/sda1",
+                    "RootDeviceType": "ebs",
+                    "SecurityGroups": [
+                        {
+                            "GroupId": "sg-0bdf4cd9390679316",
+                            "GroupName": "paycrypt-backend-sg"
+                        }
+                    ],
+                    "SourceDestCheck": true,
+                    "Tags": [
+                        {
+                            "Key": "Name",
+                            "Value": "paycrypt-backend"
+                        },
+                        {
+                            "Key": "awsApplication",
+                            "Value": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+                        }
+                    ],
+                    "VirtualizationType": "hvm",
+                    "CpuOptions": {
+                        "CoreCount": 1,
+                        "ThreadsPerCore": 2
+                    },
+                    "CapacityReservationSpecification": {
+                        "CapacityReservationPreference": "open"
+                    },
+                    "HibernationOptions": {
+                        "Configured": false
+                    },
+                    "MetadataOptions": {
+                        "State": "applied",
+                        "HttpTokens": "required",
+                        "HttpPutResponseHopLimit": 2,
+                        "HttpEndpoint": "enabled",
+                        "HttpProtocolIpv6": "disabled",
+                        "InstanceMetadataTags": "disabled"
+                    },
+                    "EnclaveOptions": {
+                        "Enabled": false
+                    },
+                    "BootMode": "uefi-preferred",
+                    "PlatformDetails": "Linux/UNIX",
+                    "UsageOperation": "RunInstances",
+                    "UsageOperationUpdateTime": "2026-04-22T07:27:12+00:00",
+                    "PrivateDnsNameOptions": {
+                        "HostnameType": "ip-name",
+                        "EnableResourceNameDnsARecord": false,
+                        "EnableResourceNameDnsAAAARecord": false
+                    },
+                    "MaintenanceOptions": {
+                        "AutoRecovery": "default",
+                        "RebootMigration": "default"
+                    },
+                    "CurrentInstanceBootMode": "uefi",
+                    "NetworkPerformanceOptions": {
+                        "BandwidthWeighting": "default"
+                    },
+                    "Operator": {
+                        "Managed": false
+                    },
+                    "InstanceId": "i-081269a28e4be24be",
+                    "ImageId": "ami-0f11fb0f6d8b520d4",
+                    "State": {
+                        "Code": 16,
+                        "Name": "running"
+                    },
+                    "PrivateDnsName": "ip-172-31-41-59.ap-south-1.compute.internal",
+                    "PublicDnsName": "ec2-65-2-34-31.ap-south-1.compute.amazonaws.com",
+                    "StateTransitionReason": "",
+                    "KeyName": "paycrypt-ec2-key",
+                    "AmiLaunchIndex": 0,
+                    "ProductCodes": [],
+                    "InstanceType": "t3.small",
+                    "LaunchTime": "2026-04-22T07:27:12+00:00",
+                    "Placement": {
+                        "AvailabilityZoneId": "aps1-az1",
+                        "GroupName": "",
+                        "Tenancy": "default",
+                        "AvailabilityZone": "ap-south-1a"
+                    },
+                    "Monitoring": {
+                        "State": "disabled"
+                    },
+                    "SubnetId": "subnet-011ea83bf29e90289",
+                    "VpcId": "vpc-09f7e74621dcfb217",
+                    "PrivateIpAddress": "172.31.41.59",
+                    "PublicIpAddress": "65.2.34.31"
+                }
+            ]
+        }
+    ]
+}

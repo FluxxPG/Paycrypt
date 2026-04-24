@@ -1,0 +1,89 @@
+﻿{
+    "SecurityGroups": [
+        {
+            "GroupId": "sg-0bdf4cd9390679316",
+            "IpPermissionsEgress": [
+                {
+                    "IpProtocol": "-1",
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ],
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "paycrypt-backend-sg"
+                },
+                {
+                    "Key": "awsApplication",
+                    "Value": "arn:aws:resource-groups:ap-south-1:359924468730:group/paycrypt/0c6uu6nk22io3nnzyl7ncc1egg"
+                }
+            ],
+            "VpcId": "vpc-09f7e74621dcfb217",
+            "SecurityGroupArn": "arn:aws:ec2:ap-south-1:359924468730:security-group/sg-0bdf4cd9390679316",
+            "OwnerId": "359924468730",
+            "GroupName": "paycrypt-backend-sg",
+            "Description": "Paycrypt backend access",
+            "IpPermissions": [
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 80,
+                    "ToPort": 80,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 22,
+                    "ToPort": 22,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "122.170.199.175/32"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 4001,
+                    "ToPort": 4001,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 4000,
+                    "ToPort": 4000,
+                    "UserIdGroupPairs": [],
+                    "IpRanges": [
+                        {
+                            "CidrIp": "0.0.0.0/0"
+                        }
+                    ],
+                    "Ipv6Ranges": [],
+                    "PrefixListIds": []
+                }
+            ]
+        }
+    ]
+}

@@ -169,9 +169,7 @@ export const WalletsPanel = () => {
         <Card className="p-5">
           <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Non-custodial</p>
           <p className="mt-3 text-3xl text-white">{summary.nonCustodial}</p>
-          <p className="mt-2 text-sm text-slate-400">
-            Locked by plan + admin entitlement, with plan-specific wallet limits.
-          </p>
+          <p className="mt-2 text-sm text-slate-400">Merchant-owned routes available for approved chains.</p>
         </Card>
       </div>
 
@@ -440,23 +438,7 @@ export const WalletsPanel = () => {
                 </div>
               ) : null}
             </Card>
-          ) : (
-            <Card className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-lg font-medium text-white">Non-custodial wallets are locked</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    This form stays hidden until your plan allows non-custodial wallets and a super admin enables access.
-                  </p>
-                </div>
-                <Badge className="border-amber-400/30 bg-amber-400/10 text-amber-100">Plan gated</Badge>
-              </div>
-              <p className="mt-4 text-sm text-slate-400">
-                Active plan: <span className="capitalize text-slate-200">{capabilities.planCode.replaceAll("_", " ")}</span> ·
-                Platform fee {Number(capabilities.platformFeePercent).toFixed(2)}%
-              </p>
-            </Card>
-          )}
+          ) : null}
         </div>
 
         <Card className="p-6">

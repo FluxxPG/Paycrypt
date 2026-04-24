@@ -31,6 +31,9 @@ type PaymentLedgerRow = {
   settlement_provider: string | null;
   settled_at: string | null;
   created_at: string;
+  payment_method?: "crypto" | "upi";
+  upi_provider?: string;
+  upi_transaction_id?: string;
 };
 
 type FilterKey = "all" | "settled" | "unsettled" | "failed";
@@ -86,6 +89,8 @@ export const DashboardPaymentsPanel = () => {
   const [rows, setRows] = useState<PaymentLedgerRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [methodFilter, setMethodFilter] = useState<"all" | "crypto" | "upi">("all");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
 
   useEffect(() => {
     let mounted = true;
@@ -112,11 +117,24 @@ export const DashboardPaymentsPanel = () => {
 
   const filteredRows = useMemo(() => {
     const payments = rows ?? [];
-    if (filter === "settled") return payments.filter((row) => row.settlement_state === "settled");
-    if (filter === "unsettled") return payments.filter(isUnsettledRow);
-    if (filter === "failed") return payments.filter(isFailedRow);
-    return payments;
-  }, [filter, rows]);
+    let scoped = payments;
+    if (filter === "settled") scoped = scoped.filter((row) => row.settlement_state === "settled");
+    if (filter === "unsettled") scoped = scoped.filter(isUnsettledRow);
+    if (filter === "failed") scoped = scoped.filter(isFailedRow);
+    if (methodFilter !== "all") scoped = scoped.filter((row) => row.payment_method === methodFilter);
+    if (providerFilter !== "all") scoped = scoped.filter((row) => (row.upi_provider ?? "crypto") === providerFilter);
+    return scoped;
+  }, [filter, methodFilter, providerFilter, rows]);
+
+  const providerOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const row of rows ?? []) {
+      if (row.payment_method === "upi" && row.upi_provider) {
+        values.add(row.upi_provider);
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
 
   if (error) return <Card className="text-rose-300">{error}</Card>;
   if (!rows) return <Card>Loading unified payment ledger...</Card>;
@@ -177,6 +195,28 @@ export const DashboardPaymentsPanel = () => {
                 {label}
               </button>
             ))}
+            <select
+              value={methodFilter}
+              onChange={(event) => setMethodFilter(event.target.value as "all" | "crypto" | "upi")}
+              className="glass-soft rounded-full px-4 py-2 text-xs text-slate-200"
+            >
+              <option value="all">All methods</option>
+              <option value="crypto">Crypto</option>
+              <option value="upi">UPI</option>
+            </select>
+            <select
+              value={providerFilter}
+              onChange={(event) => setProviderFilter(event.target.value)}
+              className="glass-soft rounded-full px-4 py-2 text-xs text-slate-200"
+            >
+              <option value="all">All providers</option>
+              <option value="crypto">Crypto route</option>
+              {providerOptions.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -185,6 +225,7 @@ export const DashboardPaymentsPanel = () => {
             <thead className="border-b border-white/10 bg-white/5">
               <tr>
                 <th className="px-6 py-4">Payment</th>
+                <th className="px-6 py-4">Method</th>
                 <th className="px-6 py-4">Amount</th>
                 <th className="px-6 py-4">Wallet source</th>
                 <th className="px-6 py-4">On-chain</th>
@@ -200,6 +241,18 @@ export const DashboardPaymentsPanel = () => {
                     <p className="mt-2 text-xs text-slate-500">
                       {payment.customer_name ?? payment.customer_email ?? "Direct checkout"} · {formatTime(payment.created_at)}
                     </p>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={
+                      payment.payment_method === "upi" 
+                        ? "bg-purple-400/20 text-purple-400 px-2 py-1 rounded-full text-xs"
+                        : "bg-cyan-400/20 text-cyan-400 px-2 py-1 rounded-full text-xs"
+                    }>
+                      {payment.payment_method === "upi" ? "UPI" : "Crypto"}
+                    </span>
+                    {payment.payment_method === "upi" && payment.upi_provider && (
+                      <p className="mt-1 text-xs text-slate-400 capitalize">{payment.upi_provider}</p>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-white">
@@ -256,7 +309,7 @@ export const DashboardPaymentsPanel = () => {
               ))}
               {!filteredRows.length ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
                     No payments match this filter.
                   </td>
                 </tr>

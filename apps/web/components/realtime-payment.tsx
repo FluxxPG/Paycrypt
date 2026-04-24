@@ -1,73 +1,91 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { io } from "socket.io-client";
-import { getApiBaseUrl, getWsBaseUrl } from "../lib/runtime-config";
+import { getApiBaseUrl } from "../lib/runtime-config";
 import { Badge } from "./ui/badge";
 
-export const RealtimePayment = ({
-  paymentId,
-  merchantId,
-  initialStatus,
-  successUrl,
-  cancelUrl
-}: {
+type Props = {
   paymentId: string;
   merchantId: string;
   initialStatus: string;
-  successUrl?: string;
-  cancelUrl?: string;
-}) => {
+  paymentMethod?: "crypto" | "upi";
+};
+
+export const RealtimePayment = ({ paymentId, merchantId, initialStatus, paymentMethod = "crypto" }: Props) => {
   const [status, setStatus] = useState(initialStatus);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
   useEffect(() => {
-    const realtimeBaseUrl = getWsBaseUrl();
-    const usePollingOnly =
-      /^https:\/\/.*cloudfront\.net$/i.test(realtimeBaseUrl) ||
-      process.env.NEXT_PUBLIC_WS_TRANSPORT === "polling";
+    const wsUrl = `${getApiBaseUrl().replace("http", "ws")}/ws/payments/${paymentId}`;
+    const socket = new WebSocket(wsUrl);
 
-    const socket = io(realtimeBaseUrl, {
-      transports: usePollingOnly ? ["polling"] : ["polling", "websocket"],
-      upgrade: !usePollingOnly,
-      reconnectionAttempts: 5,
-      timeout: 10000
-    });
-    socket.emit("merchant:join", merchantId);
-    socket.emit("payment:join", paymentId);
+    socket.onopen = () => {
+      console.log("WebSocket connected");
+    };
 
-    const update = (payload: { status: string }) => {
-      setStatus(payload.status);
-      if (payload.status === "confirmed" && successUrl) {
-        window.location.assign(successUrl);
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.status) {
+        setStatus(data.status);
       }
-      if ((payload.status === "failed" || payload.status === "expired") && cancelUrl) {
-        window.location.assign(cancelUrl);
+      // Handle UPI-specific updates
+      if (paymentMethod === "upi" && data.upiStatus) {
+        setStatus(data.upiStatus);
       }
     };
-    socket.on("payment.pending", update);
-    socket.on("payment.confirmed", update);
-    socket.on("payment.failed", update);
-    socket.on("payment.expired", update);
 
-    if (!usePollingOnly) {
-      socket.on("connect_error", async () => {
-        try {
-          const response = await fetch(`${getApiBaseUrl()}/public/payments/${paymentId}`, {
-            cache: "no-store"
-          });
-          if (!response.ok) return;
-          const payload = (await response.json()) as { status?: string };
-          if (payload.status) update({ status: payload.status });
-        } catch {
-          // Ignore polling fallback errors here; the UI will keep its current state.
-        }
-      });
-    }
+    socket.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    socket.onclose = () => {
+      console.log("WebSocket disconnected");
+    };
+
+    setWs(socket);
 
     return () => {
-      socket.disconnect();
+      socket.close();
     };
-  }, [merchantId, paymentId, successUrl, cancelUrl]);
+  }, [paymentId, paymentMethod]);
 
-  return <Badge className="capitalize">{status}</Badge>;
+  const statusColor = (s: string) => {
+    switch (s) {
+      case "confirmed":
+        return "text-emerald-400";
+      case "failed":
+        return "text-rose-400";
+      case "created":
+        return "text-amber-400";
+      case "pending":
+        return "text-blue-400";
+      case "expired":
+        return "text-gray-400";
+      default:
+        return "text-slate-400";
+    }
+  };
+
+  const statusLabel = (s: string) => {
+    switch (s) {
+      case "confirmed":
+        return paymentMethod === "upi" ? "UPI Confirmed" : "Confirmed";
+      case "failed":
+        return "Failed";
+      case "created":
+        return paymentMethod === "upi" ? "UPI Initiated" : "Created";
+      case "pending":
+        return "Pending";
+      case "expired":
+        return "Expired";
+      default:
+        return s;
+    }
+  };
+
+  return (
+    <Badge className={`capitalize ${statusColor(status)}`}>
+      {statusLabel(status)}
+    </Badge>
+  );
 };
