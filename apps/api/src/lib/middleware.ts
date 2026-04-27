@@ -3,7 +3,7 @@ import { query } from "./db.js";
 import { sendError } from "./http.js";
 import { redis } from "./redis.js";
 import { recordAuthResult, recordIdempotencyHit, recordRateLimitHit } from "./telemetry.js";
-import { compareHash, verifyAccessToken } from "./security.js";
+import { compareHash, verifyAccessToken, verifyRefreshToken } from "./security.js";
 import { logUsage } from "./services.js";
 
 export interface AuthenticatedRequest extends Request {
@@ -21,33 +21,66 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+const loadActorForUser = async (userId: string) => {
+  const userResult = await query<{
+    merchant_id: string;
+    role: "merchant" | "admin" | "super_admin";
+    must_change_password: boolean;
+  }>(
+    "select merchant_id, role, must_change_password from users where id = $1 limit 1",
+    [userId]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    return null;
+  }
+  return {
+    userId,
+    merchantId: user.merchant_id,
+    role: user.role,
+    requiresPasswordSetup: Boolean(user.must_change_password)
+  };
+};
+
 export const requireJwt = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
+  const bearerToken = header?.startsWith("Bearer ") ? header.replace("Bearer ", "").trim() : null;
+  const refreshToken =
+    typeof (req as Request & { cookies?: Record<string, unknown> }).cookies?.refresh_token === "string"
+      ? String((req as Request & { cookies?: Record<string, unknown> }).cookies?.refresh_token)
+      : null;
+
+  if (!bearerToken && !refreshToken) {
     return sendError(res, 401, "unauthorized", "Missing bearer token");
   }
 
   try {
-    const token = header.replace("Bearer ", "");
-    const payload = verifyAccessToken(token);
-    const userResult = await query<{
-      merchant_id: string;
-      role: "merchant" | "admin" | "super_admin";
-      must_change_password: boolean;
-    }>(
-      "select merchant_id, role, must_change_password from users where id = $1 limit 1",
-      [payload.sub]
-    );
-    const user = userResult.rows[0];
-    if (!user) {
+    let userId: string | null = null;
+
+    if (bearerToken) {
+      const payload = verifyAccessToken(bearerToken);
+      userId = payload.sub;
+    } else if (refreshToken) {
+      const payload = verifyRefreshToken(refreshToken);
+      const tokenResult = await query(
+        "select id from refresh_tokens where user_id = $1 and token = $2 and revoked_at is null and expires_at > now() limit 1",
+        [payload.sub, refreshToken]
+      );
+      if (!tokenResult.rows[0]) {
+        return sendError(res, 401, "unauthorized", "Invalid or expired refresh token");
+      }
+      userId = payload.sub;
+    }
+
+    if (!userId) {
       return sendError(res, 401, "unauthorized", "Invalid or expired access token");
     }
-    req.actor = {
-      userId: payload.sub,
-      merchantId: user.merchant_id,
-      role: user.role,
-      requiresPasswordSetup: Boolean(user.must_change_password)
-    };
+
+    const actor = await loadActorForUser(userId);
+    if (!actor) {
+      return sendError(res, 401, "unauthorized", "Invalid or expired access token");
+    }
+    req.actor = actor;
     void recordAuthResult("jwt", true).catch((error) => console.error("Failed to record JWT auth telemetry", error));
     next();
   } catch (error) {

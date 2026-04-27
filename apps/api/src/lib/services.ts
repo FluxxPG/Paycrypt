@@ -12,7 +12,7 @@ import {
   type SupportedNetwork
 } from "@cryptopay/shared";
 import { createApiKeyPair, createPaymentLinkReference, createPaymentReference } from "./keys.js";
-import { verifyMessage } from "ethers";
+import { getAddress, isAddress, verifyMessage } from "ethers";
 import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
@@ -256,6 +256,95 @@ const getMerchantBinanceCredentials = async (merchantId: string): Promise<Binanc
     [merchantId]
   );
   return resolveMerchantBinanceCredentials(result.rows[0]);
+};
+
+const nonCustodialNetworks: SupportedNetwork[] = ["TRC20", "ERC20", "SOL"];
+
+const normalizeWalletProvider = (provider?: string) => {
+  const normalized = String(provider ?? "merchant").trim();
+  if (!normalized) {
+    return "merchant";
+  }
+  if (normalized.length > 64) {
+    throw new AppError(400, "invalid_wallet_provider", "Wallet provider must be 64 characters or fewer");
+  }
+  if (!/^[\w .-]+$/.test(normalized)) {
+    throw new AppError(
+      400,
+      "invalid_wallet_provider",
+      "Wallet provider may include letters, numbers, spaces, dot, underscore, and hyphen"
+    );
+  }
+  return normalized;
+};
+
+const normalizeNonCustodialAddress = (network: SupportedNetwork, address: string) => {
+  const normalizedAddress = String(address ?? "").trim();
+  if (!normalizedAddress) {
+    throw new AppError(400, "wallet_address_required", "Wallet address is required");
+  }
+
+  if (network === "ERC20") {
+    if (!isAddress(normalizedAddress)) {
+      throw new AppError(400, "invalid_wallet_address", "Invalid ERC20 wallet address");
+    }
+    return getAddress(normalizedAddress);
+  }
+
+  if (network === "TRC20") {
+    if (!TronWeb.isAddress(normalizedAddress)) {
+      throw new AppError(400, "invalid_wallet_address", "Invalid TRC20 wallet address");
+    }
+    return normalizedAddress;
+  }
+
+  if (network === "SOL") {
+    try {
+      return new PublicKey(normalizedAddress).toBase58();
+    } catch {
+      throw new AppError(400, "invalid_wallet_address", "Invalid Solana wallet address");
+    }
+  }
+
+  throw new AppError(
+    400,
+    "unsupported_non_custodial_network",
+    "Non-custodial wallets are supported only for TRC20, ERC20, and SOL"
+  );
+};
+
+const normalizeNonCustodialWalletInput = (input: {
+  asset: string;
+  network: string;
+  address: string;
+  provider?: string;
+}) => {
+  const asset = String(input.asset ?? "").trim().toUpperCase();
+  const network = String(input.network ?? "").trim().toUpperCase() as SupportedNetwork;
+
+  if (!isSupportedAsset(asset)) {
+    throw new AppError(400, "unsupported_asset", "Unsupported asset");
+  }
+  if (!isSupportedNetwork(network)) {
+    throw new AppError(400, "unsupported_network", "Unsupported network");
+  }
+  if (!isNetworkSupportedForAsset(asset, network)) {
+    throw new AppError(400, "unsupported_asset_network", `Unsupported network ${network} for asset ${asset}`);
+  }
+  if (!nonCustodialNetworks.includes(network)) {
+    throw new AppError(
+      400,
+      "unsupported_non_custodial_network",
+      "Non-custodial wallets are supported only for TRC20, ERC20, and SOL"
+    );
+  }
+
+  return {
+    asset,
+    network,
+    address: normalizeNonCustodialAddress(network, input.address),
+    provider: normalizeWalletProvider(input.provider)
+  };
 };
 
 type WalletPreference = "auto" | "non_custodial_only";
@@ -1105,6 +1194,7 @@ export const registerNonCustodialWallet = async (
     provider?: string;
   }
 ) => {
+  const normalized = normalizeNonCustodialWalletInput(input);
   const billingContext = await assertMerchantCanManageNonCustodialWallets(merchantId);
   const walletLimit = billingContext.nonCustodialWalletLimit;
   if (walletLimit >= 0) {
@@ -1124,6 +1214,26 @@ export const registerNonCustodialWallet = async (
     }
   }
 
+  const verificationResult = await query<{ id: string }>(
+    `select id
+     from non_custodial_wallet_verifications
+     where merchant_id = $1
+       and wallet_address = $2
+       and asset = $3
+       and network = $4
+       and status = 'verified'
+     order by verified_at desc nulls last, created_at desc
+     limit 1`,
+    [merchantId, normalized.address, normalized.asset, normalized.network]
+  );
+  if (!verificationResult.rows[0]) {
+    throw new AppError(
+      403,
+      "wallet_verification_required",
+      "Wallet ownership verification is required before adding a non-custodial route"
+    );
+  }
+
   const result = await query(
     `insert into wallets (
       merchant_id,
@@ -1138,7 +1248,7 @@ export const registerNonCustodialWallet = async (
     ) values ($1,'non_custodial',$2,$3,$4,$5,true,false,null)
     on conflict do nothing
     returning id`,
-    [merchantId, input.provider ?? "merchant", input.asset, input.network, input.address]
+    [merchantId, normalized.provider, normalized.asset, normalized.network, normalized.address]
   );
   if (!result.rows[0]) {
     throw new AppError(409, "wallet_exists", "Wallet address already registered");
@@ -1148,16 +1258,54 @@ export const registerNonCustodialWallet = async (
 
 export const createWalletVerification = async (
   merchantId: string,
-  input: { asset: string; network: string; address: string }
+  input: { asset: string; network: string; address: string; provider?: string }
 ) => {
+  const normalized = normalizeNonCustodialWalletInput(input);
   await assertMerchantCanManageNonCustodialWallets(merchantId);
+  const existingWallet = await query<{ id: string }>(
+    `select id
+     from wallets
+     where merchant_id = $1
+       and wallet_type = 'non_custodial'
+       and asset = $2
+       and network = $3
+       and address = $4
+       and payment_id is null
+     limit 1`,
+    [merchantId, normalized.asset, normalized.network, normalized.address]
+  );
+  if (existingWallet.rows[0]) {
+    throw new AppError(409, "wallet_exists", "Wallet address already registered");
+  }
+
+  const pending = await query<{
+    id: string;
+    challenge_message: string;
+    wallet_address: string;
+    provider: string | null;
+  }>(
+    `select id, challenge_message, wallet_address, provider
+     from non_custodial_wallet_verifications
+     where merchant_id = $1
+       and wallet_address = $2
+       and asset = $3
+       and network = $4
+       and status = 'pending'
+     order by created_at desc
+     limit 1`,
+    [merchantId, normalized.address, normalized.asset, normalized.network]
+  );
+  if (pending.rows[0]) {
+    return pending.rows[0];
+  }
+
   const challenge = `cryptopay_verify_${merchantId}_${Date.now()}`;
   const result = await query(
     `insert into non_custodial_wallet_verifications
-     (merchant_id, wallet_address, asset, network, challenge_message, status)
-     values ($1,$2,$3,$4,$5,'pending')
-     returning id, challenge_message`,
-    [merchantId, input.address, input.asset, input.network, challenge]
+     (merchant_id, wallet_address, asset, network, provider, challenge_message, status)
+     values ($1,$2,$3,$4,$5,$6,'pending')
+     returning id, challenge_message, wallet_address, provider`,
+    [merchantId, normalized.address, normalized.asset, normalized.network, normalized.provider, challenge]
   );
   return result.rows[0];
 };
@@ -1166,16 +1314,33 @@ export const approveWalletVerification = async (
   verificationId: string,
   merchantId: string
 ) => {
-  const result = await query(
+  const existing = await query<{ status: string }>(
+    `select status
+     from non_custodial_wallet_verifications
+     where id = $1 and merchant_id = $2
+     limit 1`,
+    [verificationId, merchantId]
+  );
+  if (!existing.rows[0]) {
+    throw new AppError(404, "verification_not_found", "Verification not found");
+  }
+  if (existing.rows[0].status !== "pending") {
+    throw new AppError(409, "verification_already_processed", "Verification already processed");
+  }
+
+  const result = await query<{
+    id: string;
+    wallet_address: string;
+    asset: string;
+    network: string;
+    provider: string | null;
+  }>(
     `update non_custodial_wallet_verifications
      set status = 'verified', verified_at = now()
      where id = $1 and merchant_id = $2
-     returning id, wallet_address, asset, network`,
+     returning id, wallet_address, asset, network, provider`,
     [verificationId, merchantId]
   );
-  if (!result.rows[0]) {
-    throw new AppError(404, "verification_not_found", "Verification not found");
-  }
   return result.rows[0];
 };
 
@@ -1198,7 +1363,12 @@ const verifyWalletSignature = async (
   }
 
   if (network === "TRC20") {
-    return TronWeb.utils.crypto.verifyMessage(message, signature, address);
+    try {
+      const recovered = TronWeb.utils.message.verifyMessage(message, signature);
+      return TronWeb.address.toHex(recovered).toLowerCase() === TronWeb.address.toHex(address).toLowerCase();
+    } catch {
+      return false;
+    }
   }
 
   return false;
@@ -1218,10 +1388,11 @@ export const confirmWalletVerification = async (
       wallet_address: string;
       asset: string;
       network: string;
+      provider: string | null;
       challenge_message: string;
       status: string;
     }>(
-      `select id, wallet_address, asset, network, challenge_message, status
+      `select id, wallet_address, asset, network, provider, challenge_message, status
        from non_custodial_wallet_verifications
        where id = $1 and merchant_id = $2
        limit 1`,
@@ -1251,12 +1422,13 @@ export const confirmWalletVerification = async (
       wallet_address: string;
       asset: string;
       network: string;
+      provider: string | null;
       status: string;
     }>(
       `update non_custodial_wallet_verifications
        set status = 'verified', verified_at = now(), signature = $3
        where id = $1 and merchant_id = $2
-       returning id, wallet_address, asset, network, status`,
+       returning id, wallet_address, asset, network, provider, status`,
       [verificationId, merchantId, signature]
     );
     const verifiedRecord = update.rows[0];
@@ -1313,9 +1485,16 @@ export const confirmWalletVerification = async (
           is_active,
           is_selected,
           last_seen_at
-        ) values ($1,'non_custodial','merchant',$2,$3,$4,true,$5,null)
+        ) values ($1,'non_custodial',$2,$3,$4,$5,true,$6,null)
         returning id`,
-        [merchantId, verifiedRecord.asset, verifiedRecord.network, verifiedRecord.wallet_address, shouldSelect]
+        [
+          merchantId,
+          normalizeWalletProvider(verifiedRecord.provider ?? "merchant"),
+          verifiedRecord.asset,
+          verifiedRecord.network,
+          verifiedRecord.wallet_address,
+          shouldSelect
+        ]
       );
       walletId = inserted.rows[0]?.id ?? null;
     }
@@ -1850,6 +2029,7 @@ export const listWalletVerificationsForAdmin = async (merchantId?: string) =>
         wallet_address,
         asset,
         network,
+        provider,
         challenge_message,
         status,
         created_at,
@@ -1903,8 +2083,15 @@ export const approveWalletVerificationForAdmin = async (
     await query(
       `insert into wallets (
         merchant_id, wallet_type, provider, asset, network, address, is_active, is_selected, last_seen_at
-      ) values ($1,'non_custodial','merchant',$2,$3,$4,true,$5,null)`,
-      [merchantId, result.asset, result.network, result.wallet_address, shouldSelect]
+      ) values ($1,'non_custodial',$2,$3,$4,$5,true,$6,null)`,
+      [
+        merchantId,
+        normalizeWalletProvider(result.provider ?? "merchant"),
+        result.asset,
+        result.network,
+        result.wallet_address,
+        shouldSelect
+      ]
     );
   }
   await query(

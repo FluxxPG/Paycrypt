@@ -17,7 +17,6 @@ import {
   listWallets,
   createWalletVerification,
   confirmWalletVerification,
-  approveWalletVerification,
   provisionCustodialWallet,
   registerNonCustodialWallet,
   revokeApiKey,
@@ -402,15 +401,22 @@ dashboardRouter.post("/wallets", async (req, res) => {
     address: string;
     provider?: string;
   };
+  const normalizedAsset = String(asset ?? "").trim().toUpperCase();
+  const normalizedNetwork = String(network ?? "").trim().toUpperCase();
 
-  if (!supportedAssets.includes(asset as any) || !supportedNetworks.includes(network as any)) {
+  if (!supportedAssets.includes(normalizedAsset as any) || !supportedNetworks.includes(normalizedNetwork as any)) {
     return res.status(400).json({ message: "Unsupported asset or network" });
   }
-  if (network === "BTC") {
+  if (normalizedNetwork === "BTC") {
     return res.status(400).json({ message: "BTC is custodial-only; register a TRC20, ERC20, or SOL wallet." });
   }
 
-  const responsePayload = await registerNonCustodialWallet(merchantId, { asset, network, address, provider });
+  const responsePayload = await registerNonCustodialWallet(merchantId, {
+    asset: normalizedAsset,
+    network: normalizedNetwork,
+    address,
+    provider
+  });
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
 });
@@ -418,15 +424,22 @@ dashboardRouter.post("/wallets", async (req, res) => {
 dashboardRouter.post("/wallets/custodial", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
   const { asset, network } = req.body as { asset: string; network: string };
+  const normalizedAsset = String(asset ?? "").trim().toUpperCase();
+  const normalizedNetwork = String(network ?? "").trim().toUpperCase();
 
-  if (!supportedAssets.includes(asset as any) || !supportedNetworks.includes(network as any)) {
+  if (!supportedAssets.includes(normalizedAsset as any) || !supportedNetworks.includes(normalizedNetwork as any)) {
     return res.status(400).json({ message: "Unsupported asset or network" });
   }
-  if (!(custodialProvisioningMatrix[asset] ?? []).includes(network)) {
-    return res.status(400).json({ message: `Custodial routing is not supported for ${asset} on ${network}` });
+  if (!(custodialProvisioningMatrix[normalizedAsset] ?? []).includes(normalizedNetwork)) {
+    return res.status(400).json({
+      message: `Custodial routing is not supported for ${normalizedAsset} on ${normalizedNetwork}`
+    });
   }
 
-  const responsePayload = await provisionCustodialWallet(merchantId, { asset, network });
+  const responsePayload = await provisionCustodialWallet(merchantId, {
+    asset: normalizedAsset,
+    network: normalizedNetwork
+  });
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
 });
@@ -448,26 +461,29 @@ dashboardRouter.delete("/wallets/:id", async (req, res) => {
 
 dashboardRouter.post("/wallets/verify", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const { asset, network, address } = req.body as {
+  const { asset, network, address, provider } = req.body as {
     asset: string;
     network: string;
     address: string;
+    provider?: string;
   };
-  const responsePayload = await createWalletVerification(merchantId, { asset, network, address });
+  const responsePayload = await createWalletVerification(merchantId, { asset, network, address, provider });
   res.locals.responsePayload = responsePayload;
   res.status(201).json(responsePayload);
 });
 
 dashboardRouter.post("/wallets/verify/:id/approve", async (req, res) => {
-  const merchantId = (req as any).actor.merchantId;
-  const responsePayload = await approveWalletVerification(req.params.id, merchantId);
-  res.locals.responsePayload = responsePayload;
-  res.json(responsePayload);
+  res.status(403).json({
+    message: "Self-approval is disabled. Complete signature verification or request admin approval."
+  });
 });
 
 dashboardRouter.post("/wallets/verify/:id/confirm", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
   const { signature } = req.body as { signature: string };
+  if (!String(signature ?? "").trim()) {
+    return res.status(400).json({ message: "signature is required" });
+  }
   const responsePayload = await confirmWalletVerification(req.params.id, merchantId, signature);
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);

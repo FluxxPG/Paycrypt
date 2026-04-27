@@ -242,6 +242,7 @@ create table if not exists non_custodial_wallet_verifications (
   wallet_address text not null,
   asset text not null,
   network text not null,
+  provider text not null default 'merchant',
   challenge_message text not null,
   signature text,
   status text not null default 'pending',
