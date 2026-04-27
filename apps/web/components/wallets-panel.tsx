@@ -224,14 +224,20 @@ export const WalletsPanel = () => {
                 <Button
                   onClick={() =>
                     runWalletAction("connect-binance", async () => {
+                      const normalized = {
+                        apiKey: binanceForm.apiKey.trim(),
+                        apiSecret: binanceForm.apiSecret.trim()
+                      };
                       await apiFetch("/dashboard/wallets/binance", {
                         method: "PUT",
-                        body: JSON.stringify(binanceForm)
+                        body: JSON.stringify(normalized)
                       });
                       setBinanceForm({ apiKey: "", apiSecret: "" });
                     })
                   }
-                  disabled={busyKey === "connect-binance" || !binanceForm.apiKey || !binanceForm.apiSecret}
+                  disabled={
+                    busyKey === "connect-binance" || !binanceForm.apiKey.trim() || !binanceForm.apiSecret.trim()
+                  }
                 >
                   {busyKey === "connect-binance" ? "Connecting Binance..." : "Connect merchant Binance"}
                 </Button>

@@ -193,7 +193,7 @@ const getSelectedNonCustodialWallet = async (
     address: string;
     provider: string;
   }>(
-    `select address, provider
+    `select id, address, provider
      from wallets
      where merchant_id = $1
        and wallet_type = 'non_custodial'
@@ -230,6 +230,32 @@ const getSelectedCustodialWallet = async (
     [merchantId, asset, network]
   );
   return result.rows[0] ?? null;
+};
+
+type MerchantBinanceCredentialRow = {
+  binance_api_key_enc: string | null;
+  binance_api_secret_enc: string | null;
+};
+
+const resolveMerchantBinanceCredentials = (row?: MerchantBinanceCredentialRow | null): BinanceCredentials | null => {
+  if (!row?.binance_api_key_enc || !row.binance_api_secret_enc) {
+    return null;
+  }
+  return {
+    apiKey: decryptSecret(row.binance_api_key_enc).trim(),
+    apiSecret: decryptSecret(row.binance_api_secret_enc).trim()
+  };
+};
+
+const getMerchantBinanceCredentials = async (merchantId: string): Promise<BinanceCredentials | null> => {
+  const result = await query<MerchantBinanceCredentialRow>(
+    `select binance_api_key_enc, binance_api_secret_enc
+     from merchants
+     where id = $1
+     limit 1`,
+    [merchantId]
+  );
+  return resolveMerchantBinanceCredentials(result.rows[0]);
 };
 
 type WalletPreference = "auto" | "non_custodial_only";
@@ -277,6 +303,8 @@ export const createPaymentIntent = async (
   if (walletPreference === "non_custodial_only") {
     await assertMerchantCanManageNonCustodialWallets(merchantId);
   }
+  const merchantBinanceCredentials =
+    walletPreference === "non_custodial_only" ? null : await getMerchantBinanceCredentials(merchantId);
 
   for (const network of supportedRouteNetworks) {
     const nonCustodialWallet = await getSelectedNonCustodialWallet(merchantId, requestedRoute.asset, network);
@@ -321,7 +349,9 @@ export const createPaymentIntent = async (
     }
 
     try {
-      const deposit = await getBinanceDepositAddress(requestedRoute.asset, network);
+      const deposit = merchantBinanceCredentials
+        ? await getBinanceDepositAddressForCredentials(requestedRoute.asset, network, merchantBinanceCredentials)
+        : await getBinanceDepositAddress(requestedRoute.asset, network);
       walletRoutes[network] = {
         asset: requestedRoute.asset,
         network,
@@ -801,17 +831,7 @@ export const provisionCustodialWallet = async (
   input: { asset: string; network: string }
 ) => {
   await assertMerchantPlatformAccess(merchantId);
-  const merchantCredentialResult = await query<{ binance_api_key_enc: string | null; binance_api_secret_enc: string | null }>(
-    `select binance_api_key_enc, binance_api_secret_enc from merchants where id = $1 limit 1`,
-    [merchantId]
-  );
-  const merchantCredentials =
-    merchantCredentialResult.rows[0]?.binance_api_key_enc && merchantCredentialResult.rows[0]?.binance_api_secret_enc
-      ? {
-          apiKey: decryptSecret(merchantCredentialResult.rows[0].binance_api_key_enc),
-          apiSecret: decryptSecret(merchantCredentialResult.rows[0].binance_api_secret_enc)
-        }
-      : null;
+  const merchantCredentials = await getMerchantBinanceCredentials(merchantId);
 
   let deposit;
   try {
@@ -893,9 +913,13 @@ export const upsertMerchantBinanceCredentials = async (
   merchantId: string,
   credentials: BinanceCredentials
 ) => {
-  await validateBinanceCredentials(credentials);
-  const encryptedKey = encryptSecret(credentials.apiKey);
-  const encryptedSecret = encryptSecret(credentials.apiSecret);
+  const normalizedCredentials = {
+    apiKey: credentials.apiKey.trim(),
+    apiSecret: credentials.apiSecret.trim()
+  };
+  await validateBinanceCredentials(normalizedCredentials);
+  const encryptedKey = encryptSecret(normalizedCredentials.apiKey);
+  const encryptedSecret = encryptSecret(normalizedCredentials.apiSecret);
   await query(
     `update merchants
      set binance_api_key_enc = $2,
@@ -934,13 +958,7 @@ export const getMerchantBinanceStatus = async (merchantId: string) => {
     [merchantId]
   );
   const row = result.rows[0];
-  const merchantCredentials =
-    row?.binance_api_key_enc && row?.binance_api_secret_enc
-      ? {
-          apiKey: decryptSecret(row.binance_api_key_enc),
-          apiSecret: decryptSecret(row.binance_api_secret_enc)
-        }
-      : null;
+  const merchantCredentials = resolveMerchantBinanceCredentials(row);
   const source = merchantCredentials ? "merchant" : "platform";
 
   try {
@@ -1192,47 +1210,121 @@ export const confirmWalletVerification = async (
   signature: string
 ) => {
   await assertMerchantCanManageNonCustodialWallets(merchantId);
-  const record = await query<{
-    id: string;
-    wallet_address: string;
-    asset: string;
-    network: string;
-    challenge_message: string;
-    status: string;
-  }>(
-    `select id, wallet_address, asset, network, challenge_message, status
-     from non_custodial_wallet_verifications
-     where id = $1 and merchant_id = $2
-     limit 1`,
-    [verificationId, merchantId]
-  );
+  const billingContext = await getMerchantBillingContext(merchantId);
 
-  const verification = record.rows[0];
-  if (!verification) {
-    throw new AppError(404, "verification_not_found", "Verification not found");
-  }
-  if (verification.status !== "pending") {
-    throw new AppError(409, "verification_already_processed", "Verification already processed");
-  }
+  return withTransaction(async (client) => {
+    const record = await client.query<{
+      id: string;
+      wallet_address: string;
+      asset: string;
+      network: string;
+      challenge_message: string;
+      status: string;
+    }>(
+      `select id, wallet_address, asset, network, challenge_message, status
+       from non_custodial_wallet_verifications
+       where id = $1 and merchant_id = $2
+       limit 1`,
+      [verificationId, merchantId]
+    );
 
-  const valid = await verifyWalletSignature(
-    verification.network,
-    verification.wallet_address,
-    verification.challenge_message,
-    signature
-  );
-  if (!valid) {
-    throw new AppError(400, "invalid_signature", "Signature verification failed");
-  }
+    const verification = record.rows[0];
+    if (!verification) {
+      throw new AppError(404, "verification_not_found", "Verification not found");
+    }
+    if (verification.status !== "pending") {
+      throw new AppError(409, "verification_already_processed", "Verification already processed");
+    }
 
-  const update = await query(
-    `update non_custodial_wallet_verifications
-     set status = 'verified', verified_at = now(), signature = $3
-     where id = $1 and merchant_id = $2
-     returning id, wallet_address, asset, network, status`,
-    [verificationId, merchantId, signature]
-  );
-  return update.rows[0];
+    const valid = await verifyWalletSignature(
+      verification.network,
+      verification.wallet_address,
+      verification.challenge_message,
+      signature
+    );
+    if (!valid) {
+      throw new AppError(400, "invalid_signature", "Signature verification failed");
+    }
+
+    const update = await client.query<{
+      id: string;
+      wallet_address: string;
+      asset: string;
+      network: string;
+      status: string;
+    }>(
+      `update non_custodial_wallet_verifications
+       set status = 'verified', verified_at = now(), signature = $3
+       where id = $1 and merchant_id = $2
+       returning id, wallet_address, asset, network, status`,
+      [verificationId, merchantId, signature]
+    );
+    const verifiedRecord = update.rows[0];
+
+    const existingWallet = await client.query<{ id: string }>(
+      `select id
+       from wallets
+       where merchant_id = $1
+         and wallet_type = 'non_custodial'
+         and asset = $2
+         and network = $3
+         and address = $4
+       limit 1`,
+      [merchantId, verifiedRecord.asset, verifiedRecord.network, verifiedRecord.wallet_address]
+    );
+
+    let walletId = existingWallet.rows[0]?.id ?? null;
+
+    if (!walletId) {
+      const walletLimit = billingContext.nonCustodialWalletLimit;
+      if (walletLimit >= 0) {
+        const walletCountResult = await client.query<{ total: number }>(
+          `select count(*)::int as total
+           from wallets
+           where merchant_id = $1 and wallet_type = 'non_custodial' and payment_id is null`,
+          [merchantId]
+        );
+        const currentWalletCount = walletCountResult.rows[0]?.total ?? 0;
+        if (currentWalletCount >= walletLimit) {
+          throw new AppError(
+            403,
+            "non_custodial_wallet_limit_reached",
+            `Your current plan allows only ${walletLimit} reusable non-custodial wallet${walletLimit === 1 ? "" : "s"}`
+          );
+        }
+      }
+
+      const selectedResult = await client.query<{ id: string }>(
+        `select id
+         from wallets
+         where merchant_id = $1 and asset = $2 and network = $3 and is_selected = true
+         limit 1`,
+        [merchantId, verifiedRecord.asset, verifiedRecord.network]
+      );
+      const shouldSelect = !selectedResult.rows[0];
+      const inserted = await client.query<{ id: string }>(
+        `insert into wallets (
+          merchant_id,
+          wallet_type,
+          provider,
+          asset,
+          network,
+          address,
+          is_active,
+          is_selected,
+          last_seen_at
+        ) values ($1,'non_custodial','merchant',$2,$3,$4,true,$5,null)
+        returning id`,
+        [merchantId, verifiedRecord.asset, verifiedRecord.network, verifiedRecord.wallet_address, shouldSelect]
+      );
+      walletId = inserted.rows[0]?.id ?? null;
+    }
+
+    return {
+      ...verifiedRecord,
+      wallet_id: walletId
+    };
+  });
 };
 
 export const getSubscriptionSummary = async (merchantId: string) => {

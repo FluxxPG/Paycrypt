@@ -374,10 +374,15 @@ dashboardRouter.get("/wallets/binance", async (req, res) => {
 dashboardRouter.put("/wallets/binance", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
   const { apiKey, apiSecret } = req.body as { apiKey: string; apiSecret: string };
-  if (!apiKey || !apiSecret) {
+  const trimmedApiKey = String(apiKey ?? "").trim();
+  const trimmedApiSecret = String(apiSecret ?? "").trim();
+  if (!trimmedApiKey || !trimmedApiSecret) {
     return res.status(400).json({ message: "apiKey and apiSecret are required" });
   }
-  const responsePayload = await upsertMerchantBinanceCredentials(merchantId, { apiKey, apiSecret });
+  const responsePayload = await upsertMerchantBinanceCredentials(merchantId, {
+    apiKey: trimmedApiKey,
+    apiSecret: trimmedApiSecret
+  });
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);
 });

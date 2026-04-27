@@ -203,6 +203,8 @@ const loadPayment = async (paymentId: string) => {
     network: string;
     wallet_address: string;
     wallet_routes: Record<string, { asset: string; network: string; address: string }>;
+    binance_api_key_enc: string | null;
+    binance_api_secret_enc: string | null;
     status: string;
     confirmations: number;
     tx_hash: string | null;
@@ -212,9 +214,25 @@ const loadPayment = async (paymentId: string) => {
     created_at: string;
   }>(
     `select
-      id, merchant_id, settlement_currency, network, wallet_address, wallet_routes, status,
-      confirmations, tx_hash, amount_fiat, amount_crypto, expires_at, created_at
-     from payments where id = $1 limit 1`,
+      p.id,
+      p.merchant_id,
+      p.settlement_currency,
+      p.network,
+      p.wallet_address,
+      p.wallet_routes,
+      m.binance_api_key_enc,
+      m.binance_api_secret_enc,
+      p.status,
+      p.confirmations,
+      p.tx_hash,
+      p.amount_fiat,
+      p.amount_crypto,
+      p.expires_at,
+      p.created_at
+     from payments p
+     join merchants m on m.id = p.merchant_id
+     where p.id = $1
+     limit 1`,
     [paymentId]
   );
   return result.rows[0] ?? null;

@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Paycrypt Project Documentation</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 40px; 
+            line-height: 1.6; 
+            color: #333;
+        }
+        h1 { 
+            color: #2c3e50; 
+            border-bottom: 2px solid #3498db; 
+            padding-bottom: 10px; 
+            text-align: center;
+        }
+        h2 { 
+            color: #34495e; 
+            margin-top: 30px; 
+            border-bottom: 1px solid #bdc3c7;
+            padding-bottom: 5px;
+        }
+        h3 { 
+            color: #7f8c8d; 
+            margin-top: 25px;
+        }
+        table { 
+            border-collapse: collapse; 
+            width: 100%; 
+            margin: 20px 0; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 12px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f2f2f2; 
+            font-weight: bold; 
+            color: #2c3e50;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        code { 
+            background-color: #f4f4f4; 
+            padding: 2px 4px; 
+            border-radius: 3px; 
+            font-family: 'Courier New', monospace;
+        }
+        pre { 
+            background-color: #f4f4f4; 
+            padding: 15px; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+            border-left: 4px solid #3498db;
+        }
+        .toc {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .toc li {
+            margin: 8px 0;
+        }
+        .toc a {
+            color: #2980b9;
+            text-decoration: none;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        .footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #bdc3c7;
+            text-align: center;
+            color: #7f8c8d;
+        }
+        @media print {
+            body { margin: 20px; }
+            .page-break { page-break-before: always; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Paycrypt - Comprehensive Project Documentation</h1>
+        <p><strong>Crypto Payment Gateway SaaS Platform</strong></p>
+        <p>Generated on: April 23, 2026</p>
+    </div>
+
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+            <li><a href="#overview">1. Project Overview and Purpose</a></li>
+            <li><a href="#architecture">2. Architecture and Technology Stack</a></li>
+            <li><a href="#features">3. Core Features and Functionality</a></li>
+            <li><a href="#api">4. API Documentation</a></li>
+            <li><a href="#flow">5. Application Flow and User Journeys</a></li>
+            <li><a href="#database">6. Database Schema and Models</a></li>
+            <li><a href="#security">7. Security and Authentication</a></li>
+            <li><a href="#deployment">8. Deployment and Infrastructure</a></li>
+            <li><a href="#crypto">9. Supported Cryptocurrencies and Networks</a></li>
+            <li><a href="#config">10. Configuration and Environment Setup</a></li>
+        </ul>
+    </div>
+
+    <div id="overview">
+        <h2>1. Project Overview and Purpose</h2>
+        <p>Paycrypt is a comprehensive crypto-native payment gateway SaaS platform designed to enable businesses to accept cryptocurrency payments seamlessly. Built as a TypeScript monorepo, it provides a complete infrastructure for merchants to process, manage, and settle cryptocurrency transactions with the same ease as traditional payment systems.</p>
+        
+        <h3>Primary Purpose:</h3>
+        <ul>
+            <li>Enable businesses to accept cryptocurrency payments without managing complex blockchain infrastructure</li>
+            <li>Provide a Stripe-like API experience for crypto payments</li>
+            <li>Support both custodial and non-custodial wallet models</li>
+            <li>Offer real-time payment processing and settlement</li>
+            <li>Provide comprehensive merchant dashboard and admin panel</li>
+        </ul>
+        
+        <h3>Target Users:</h3>
+        <ul>
+            <li>E-commerce businesses seeking crypto payment options</li>
+            <li>Service providers wanting to expand payment methods</li>
+            <li>SaaS platforms requiring embedded payment solutions</li>
+            <li>Financial technology companies integrating crypto payments</li>
+        </ul>
+
+        <h3>Platform Scope:</h3>
+        <ul>
+            <li>Merchant login and dashboard</li>
+            <li>Super-admin login and dashboard</li>
+            <li>JWT access tokens plus refresh-token cookies</li>
+            <li>Stripe-like API key model with <code>pk_live_</code> and <code>sk_live_</code></li>
+            <li>Hosted crypto checkout at <code>/pay/[id]</code></li>
+            <li>Public payment-link pages at <code>/links/[id]</code></li>
+            <li>Realtime payment updates through Socket.IO</li>
+            <li>BullMQ background processing and settlement workflows</li>
+            <li>Supabase PostgreSQL schema and migrations</li>
+            <li>Node SDK</li>
+            <li>Binance custodial integration hooks</li>
+            <li>Feature-gated non-custodial wallet onboarding</li>
+            <li>First-login merchant password setup flow</li>
+            <li>Admin merchant create, update, suspend, and delete lifecycle</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="architecture">
+        <h2>2. Architecture and Technology Stack</h2>
+        
+        <h3>Technology Stack Overview</h3>
+        <table>
+            <tr><th>Component</th><th>Technology</th><th>Purpose</th></tr>
+            <tr><td>Frontend</td><td>Next.js 15.5.15</td><td>Merchant and Admin Web Interface</td></tr>
+            <tr><td>API Backend</td><td>Express.js</td><td>REST API Server</td></tr>
+            <tr><td>WebSocket</td><td>Socket.IO</td><td>Real-time Payment Updates</td></tr>
+            <tr><td>Background Jobs</td><td>BullMQ</td><td>Payment Processing and Settlement</td></tr>
+            <tr><td>Database</td><td>Supabase PostgreSQL</td><td>Primary Data Storage</td></tr>
+            <tr><td>Cache/Queue</td><td>Redis 7</td><td>Caching and Job Queue</td></tr>
+            <tr><td>Language</td><td>TypeScript</td><td>Type-safe Development</td></tr>
+            <tr><td>Deployment</td><td>Vercel + AWS EC2</td><td>Scalable Cloud Infrastructure</td></tr>
+            <tr><td>Containerization</td><td>Docker</td><td>Service Isolation</td></tr>
+            <tr><td>Process Management</td><td>Nginx</td><td>Load Balancing and Reverse Proxy</td></tr>
+        </table>
+
+        <h3>Monorepo Structure</h3>
+        <pre><code>paycrypt/
+├── apps/
+│   ├── api/         # Express.js REST API server
+│   ├── web/         # Next.js frontend application
+│   ├── ws/          # Socket.IO WebSocket server
+│   └── worker/      # BullMQ background job processors
+├── packages/
+│   ├── shared/      # Shared TypeScript utilities and types
+│   └── sdk/         # Node.js SDK for merchant integration
+├── supabase/
+│   └── migrations/  # Database schema migrations
+├── infra/
+│   └── aws/         # AWS deployment configurations
+├── scripts/         # Utility scripts
+└── docs/           # Documentation files</code></pre>
+
+        <h3>Service Communication</h3>
+        <p>Services communicate through Redis for real-time updates and job queues, while the API serves as the primary data access layer with PostgreSQL as the persistent storage backend.</p>
+
+        <h3>Architecture Diagram</h3>
+        <pre><code>Merchant User → Vercel Next.js Frontend → CloudFront HTTPS Edge → Express API on EC2 :4000
+Admin User → Vercel Next.js Frontend → CloudFront HTTPS Edge → Socket.IO Gateway on EC2 :4001
+Buyer → Vercel Next.js Frontend → CloudFront HTTPS Edge → BullMQ Workers → Redis 7
+SDK/Backend → CloudFront HTTPS Edge → Supabase PostgreSQL → Binance Wallet APIs</code></pre>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="features">
+        <h2>3. Core Features and Functionality</h2>
+        
+        <h3>Feature Matrix</h3>
+        <table>
+            <tr><th>Feature Category</th><th>Specific Features</th><th>Description</th></tr>
+            <tr><td>Payment Processing</td><td>Payment Intents, Payment Links</td><td>Create and manage cryptocurrency payment requests</td></tr>
+            <tr><td>Wallet Management</td><td>Custodial & Non-Custodial</td><td>Support for both managed and self-hosted wallet solutions</td></tr>
+            <tr><td>Real-time Updates</td><td>Socket.IO Integration</td><td>Live payment status updates and notifications</td></tr>
+            <tr><td>Merchant Dashboard</td><td>Analytics, Reports, Settings</td><td>Comprehensive merchant management interface</td></tr>
+            <tr><td>Admin Panel</td><td>Merchant Management, Risk Monitoring</td><td>Platform administration and oversight tools</td></tr>
+            <tr><td>API Integration</td><td>REST API, Webhooks, SDK</td><td>Developer-friendly integration options</td></tr>
+            <tr><td>Security</td><td>JWT Auth, API Keys, Rate Limiting</td><td>Enterprise-grade security measures</td></tr>
+            <tr><td>Settlement</td><td>Automated Processing, Multiple Networks</td><td>Flexible settlement options across blockchains</td></tr>
+            <tr><td>Billing</td><td>Subscription Plans, Usage Tracking</td><td>Flexible pricing and billing management</td></tr>
+            <tr><td>Compliance</td><td>Audit Logs, KYC Support</td><td>Regulatory compliance features</td></tr>
+        </table>
+
+        <h3>Key Differentiators</h3>
+        
+        <h4>Dual Wallet Model:</h4>
+        <p>Supports both custodial (managed by platform) and non-custodial (merchant-controlled) wallet options, providing flexibility based on merchant preferences and regulatory requirements.</p>
+        
+        <h4>Real-time Processing:</h4>
+        <p>WebSocket-based real-time updates ensure merchants and customers receive immediate feedback on payment status changes.</p>
+        
+        <h4>Multi-Network Support:</h4>
+        <p>Native support for TRC20 (Tron), ERC20 (Ethereum), and Solana networks, with extensible architecture for additional blockchains.</p>
+        
+        <h4>Developer-Friendly:</h4>
+        <p>Stripe-like API design, comprehensive SDK, and detailed documentation for seamless integration.</p>
+        
+        <h4>Enterprise Security:</h4>
+        <p>JWT-based authentication, API key management, rate limiting, and comprehensive audit logging for security compliance.</p>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="api">
+        <h2>4. API Documentation</h2>
+        
+        <h3>API Categories</h3>
+        <table>
+            <tr><th>API Category</th><th>Base Path</th><th>Authentication</th><th>Primary Use</th></tr>
+            <tr><td>Platform API</td><td><code>/v1</code></td><td>API Key (sk_live_)</td><td>External merchant integrations</td></tr>
+            <tr><td>Dashboard API</td><td><code>/dashboard</code></td><td>JWT + Refresh Token</td><td>Merchant dashboard functionality</td></tr>
+            <tr><td>Admin API</td><td><code>/admin</code></td><td>JWT + Admin Role</td><td>Platform administration</td></tr>
+            <tr><td>Auth API</td><td><code>/auth</code></td><td>None (login)</td><td>Authentication endpoints</td></tr>
+            <tr><td>Public API</td><td><code>/public</code></td><td>None</td><td>Public payment information</td></tr>
+            <tr><td>WebSocket</td><td><code>/socket.io</code></td><td>JWT Token</td><td>Real-time updates</td></tr>
+        </table>
+
+        <h3>Platform API Endpoints</h3>
+        
+        <h4>Payment Management</h4>
+        <ul>
+            <li><code>POST /v1/payments</code> - Create payment intent</li>
+            <li><code>GET /v1/payments/:id</code> - Retrieve payment details</li>
+            <li><code>POST /v1/payment_links</code> - Create payment link</li>
+            <li><code>GET /v1/transactions</code> - List transactions</li>
+        </ul>
+
+        <h4>Billing and Settlement</h4>
+        <ul>
+            <li><code>GET /v1/invoices</code> - List billing invoices</li>
+            <li><code>GET /v1/settlements</code> - List settlements</li>
+            <li><code>GET /v1/subscriptions</code> - Get subscription info</li>
+        </ul>
+
+        <h4>Webhooks</h4>
+        <ul>
+            <li><code>POST /v1/webhooks</code> - Create webhook endpoint</li>
+            <li>Webhook events: <code>payment.confirmed</code>, <code>payment.failed</code>, <code>settlement.completed</code></li>
+        </ul>
+
+        <h4>Authentication</h4>
+        <ul>
+            <li>Header: <code>Authorization: Bearer sk_live_xxx</code></li>
+            <li>Idempotency: <code>Idempotency-Key: &lt;unique-key&gt;</code></li>
+            <li>Rate Limiting: 120 requests/minute (configurable)</li>
+        </ul>
+
+        <h3>Dashboard API Endpoints</h3>
+        
+        <h4>Overview and Analytics</h4>
+        <ul>
+            <li><code>GET /dashboard/overview</code> - Merchant dashboard metrics</li>
+            <li><code>GET /dashboard/reports</code> - Detailed reports and analytics</li>
+            <li><code>GET /dashboard/payments</code> - Payment ledger</li>
+        </ul>
+
+        <h4>Wallet Management</h4>
+        <ul>
+            <li><code>GET /dashboard/wallets</code> - List merchant wallets</li>
+            <li><code>POST /dashboard/wallets</code> - Register non-custodial wallet</li>
+            <li><code>POST /dashboard/wallets/custodial</code> - Provision custodial wallet</li>
+            <li><code>POST /dashboard/wallets/verify</code> - Initiate wallet verification</li>
+        </ul>
+
+        <h4>Settings and Configuration</h4>
+        <ul>
+            <li><code>GET /dashboard/settings</code> - Merchant checkout settings</li>
+            <li><code>PATCH /dashboard/settings</code> - Update checkout preferences</li>
+            <li><code>GET /dashboard/api-keys</code> - List API keys</li>
+            <li><code>POST /dashboard/api-keys</code> - Create new API key pair</li>
+        </ul>
+
+        <h4>Webhooks and Integrations</h4>
+        <ul>
+            <li><code>GET /dashboard/webhooks</code> - List webhook endpoints</li>
+            <li><code>POST /dashboard/webhooks</code> - Create webhook endpoint</li>
+            <li><code>POST /dashboard/webhooks/:id/rotate</code> - Rotate webhook secret</li>
+        </ul>
+
+        <h3>Admin API Endpoints</h3>
+        
+        <h4>Merchant Management</h4>
+        <ul>
+            <li><code>GET /admin/merchants</code> - List all merchants</li>
+            <li><code>POST /admin/merchants</code> - Create new merchant</li>
+            <li><code>GET /admin/merchants/:id</code> - Get merchant details</li>
+            <li><code>PATCH /admin/merchants/:id</code> - Update merchant</li>
+            <li><code>DELETE /admin/merchants/:id</code> - Delete merchant</li>
+        </ul>
+
+        <h4>System Monitoring</h4>
+        <ul>
+            <li><code>GET /admin/analytics</code> - Platform analytics</li>
+            <li><code>GET /admin/risk</code> - Risk monitoring</li>
+            <li><code>GET /admin/system</code> - System health</li>
+            <li><code>GET /admin/custody</code> - Custodial balances</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="flow">
+        <h2>5. Application Flow and User Journeys</h2>
+        
+        <h3>Merchant Onboarding Flow</h3>
+        
+        <h4>Step 1: Admin Merchant Creation</h4>
+        <ol>
+            <li>Super admin creates merchant account via admin panel</li>
+            <li>System generates temporary password and sets <code>must_change_password</code> flag</li>
+            <li>Merchant receives credentials via email</li>
+        </ol>
+
+        <h4>Step 2: First Login and Password Setup</h4>
+        <ol>
+            <li>Merchant logs in with temporary credentials</li>
+            <li>System redirects to <code>/setup-password</code> page</li>
+            <li>Merchant sets permanent password (minimum 10 characters)</li>
+            <li>System clears forced-reset flag and issues fresh JWT tokens</li>
+            <li>Merchant gains access to dashboard</li>
+        </ol>
+
+        <h4>Step 3: Wallet Configuration</h4>
+        <ol>
+            <li>Merchant chooses between custodial and non-custodial options</li>
+            <li>For custodial: Provision wallets via Binance integration</li>
+            <li>For non-custodial: Register existing wallet addresses</li>
+            <li>System performs wallet verification process</li>
+            <li>Merchant selects preferred settlement networks</li>
+        </ol>
+
+        <h4>Step 4: API Integration</h4>
+        <ol>
+            <li>Merchant generates API key pair (public/secret)</li>
+            <li>Configure webhook endpoints for real-time notifications</li>
+            <li>Test integration with payment preview functionality</li>
+            <li>Go live with production API keys</li>
+        </ol>
+
+        <h3>Payment Processing Flow</h3>
+        
+        <h4>Step 1: Payment Intent Creation</h4>
+        <ol>
+            <li>Merchant creates payment intent via API or dashboard</li>
+            <li>System determines optimal wallet route and pricing</li>
+            <li>Payment intent is stored with unique ID and expiration</li>
+            <li>QR code and payment details are generated</li>
+        </ol>
+
+        <h4>Step 2: Customer Payment</h4>
+        <ol>
+            <li>Customer accesses hosted checkout page (<code>/pay/[id]</code>)</li>
+            <li>System displays payment details and QR code</li>
+            <li>Customer initiates cryptocurrency transfer</li>
+            <li>WebSocket connection established for real-time updates</li>
+        </ol>
+
+        <h4>Step 3: Transaction Monitoring</h4>
+        <ol>
+            <li>Background workers monitor blockchain for transaction confirmation</li>
+            <li>System validates transaction amount and recipient</li>
+            <li>Payment status updated in real-time via WebSocket</li>
+            <li>Customer and merchant receive immediate notifications</li>
+        </ol>
+
+        <h4>Step 4: Settlement Processing</h4>
+        <ol>
+            <li>Confirmed transactions queued for settlement</li>
+            <li>System processes settlement based on merchant preferences</li>
+            <li>Funds transferred to merchant settlement addresses</li>
+            <li>Webhook notifications sent for settlement completion</li>
+            <li>Transaction records updated in merchant ledger</li>
+        </ol>
+
+        <h3>Admin Management Flow</h3>
+        
+        <h4>Merchant Lifecycle Management</h4>
+        <ul>
+            <li>Create new merchant accounts with plan assignments</li>
+            <li>Update merchant information and status</li>
+            <li>Suspend or terminate merchant accounts</li>
+            <li>Manage merchant subscription plans and billing</li>
+        </ul>
+
+        <h4>Risk and Compliance Monitoring</h4>
+        <ul>
+            <li>Monitor transaction volumes and patterns</li>
+            <li>Review wallet verification requests</li>
+            <li>Track system performance and queue health</li>
+            <li>Manage system alerts and notifications</li>
+        </ul>
+
+        <h4>Platform Operations</h4>
+        <ul>
+            <li>Monitor custodial wallet balances (Binance integration)</li>
+            <li>Review settlement processing and fund movements</li>
+            <li>Analyze platform revenue and metrics</li>
+            <li>Manage system configuration and feature flags</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="database">
+        <h2>6. Database Schema and Models</h2>
+        <p>Paycrypt uses Supabase PostgreSQL as its primary database with a comprehensive schema designed to support multi-tenant architecture with proper isolation and security.</p>
+        
+        <h3>Core Tables</h3>
+        <ul>
+            <li><strong>merchants</strong>: Primary merchant accounts with billing and configuration</li>
+            <li><strong>users</strong>: User accounts linked to merchants with role-based access</li>
+            <li><strong>payments</strong>: Payment intents and transaction records</li>
+            <li><strong>transactions</strong>: Blockchain transaction details and confirmations</li>
+            <li><strong>wallets</strong>: Merchant wallet configurations (custodial/non-custodial)</li>
+            <li><strong>settlements</strong>: Settlement processing records and status</li>
+            <li><strong>api_keys</strong>: Merchant API key management with scopes and rate limits</li>
+            <li><strong>webhook_endpoints</strong>: Webhook configurations and event subscriptions</li>
+            <li><strong>subscriptions</strong>: Merchant subscription plans and billing details</li>
+            <li><strong>billing_invoices</strong>: Invoice generation and payment tracking</li>
+        </ul>
+
+        <h3>Key Relationships and Constraints</h3>
+        
+        <h4>Multi-Tenant Isolation</h4>
+        <ul>
+            <li>All merchant data isolated by <code>merchant_id</code> foreign keys</li>
+            <li>Row-level security policies ensure data isolation</li>
+            <li>Audit logging tracks all data modifications</li>
+        </ul>
+
+        <h4>Payment Flow Relationships</h4>
+        <ul>
+            <li><code>payments</code> → <code>transactions</code> (one-to-many for blockchain events)</li>
+            <li><code>payments</code> → <code>settlements</code> (one-to-one for settlement processing)</li>
+            <li><code>wallets</code> → <code>payments</code> (many-to-many for payment routing)</li>
+        </ul>
+
+        <h4>User Access Control</h4>
+        <ul>
+            <li><code>users</code> → <code>merchants</code> (many-to-one for merchant assignment)</li>
+            <li><code>api_keys</code> → <code>merchants</code> (many-to-one for API access)</li>
+            <li><code>webhook_endpoints</code> → <code>merchants</code> (many-to-one for webhooks)</li>
+        </ul>
+
+        <h4>Billing and Subscriptions</h4>
+        <ul>
+            <li><code>merchants</code> → <code>subscriptions</code> (one-to-one for active plan)</li>
+            <li><code>subscriptions</code> → <code>billing_invoices</code> (one-to-many for billing)</li>
+        </ul>
+
+        <h3>Subscription Plans</h3>
+        <p>The platform supports three subscription tiers:</p>
+        
+        <h4>1. Starter Plan</h4>
+        <ul>
+            <li>Platform fee: 1%</li>
+            <li>Non-custodial wallets: 0</li>
+            <li>Setup fee: 0 INR/USDT</li>
+            <li>Basic features only</li>
+        </ul>
+
+        <h4>2. Custom Selective Plan</h4>
+        <ul>
+            <li>Platform fee: 2%</li>
+            <li>Non-custodial wallets: 1</li>
+            <li>Setup fee: 0 INR/USDT</li>
+            <li>Advanced features</li>
+        </ul>
+
+        <h4>3. Custom Enterprise Plan</h4>
+        <ul>
+            <li>Platform fee: Customizable</li>
+            <li>Non-custodial wallets: Unlimited</li>
+            <li>Setup fee: 10,000 INR/USDT</li>
+            <li>Full feature access</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="security">
+        <h2>7. Security and Authentication</h2>
+        
+        <h3>Security Layers</h3>
+        <table>
+            <tr><th>Security Layer</th><th>Implementation</th><th>Purpose</th></tr>
+            <tr><td>Authentication</td><td>JWT Access + Refresh Tokens</td><td>Secure user session management</td></tr>
+            <tr><td>API Security</td><td>API Keys with Scopes</td><td>Programmatic access control</td></tr>
+            <tr><td>Rate Limiting</td><td>Redis-based Rate Limiting</td><td>Prevent abuse and ensure stability</td></tr>
+            <tr><td>Data Encryption</td><td>Field-level Encryption</td><td>Protect sensitive data at rest</td></tr>
+            <tr><td>Audit Logging</td><td>Comprehensive Audit Trail</td><td>Track all system actions</td></tr>
+            <tr><td>Webhook Security</td><td>HMAC Signature Verification</td><td>Secure webhook delivery</td></tr>
+            <tr><td>Network Security</td><td>HTTPS/WSS Only</td><td>Encrypt all network communications</td></tr>
+            <tr><td>Input Validation</td><td>Strict Input Sanitization</td><td>Prevent injection attacks</td></tr>
+            <tr><td>Password Security</td><td>bcrypt Hashing</td><td>Secure password storage</td></tr>
+            <tr><td>Session Management</td><td>HttpOnly Cookies</td><td>Prevent session hijacking</td></tr>
+        </table>
+
+        <h3>JWT Token Structure</h3>
+        <ul>
+            <li><strong>Access Tokens</strong>: Short-lived (15 minutes) for API requests</li>
+            <li><strong>Refresh Tokens</strong>: Long-lived (30 days) stored in HttpOnly cookies</li>
+            <li><strong>Token Payload</strong>: User ID, merchant ID, role, and permissions</li>
+        </ul>
+
+        <h3>API Key Management</h3>
+        <ul>
+            <li><strong>Public Keys (pk_live_)</strong>: Read-only operations</li>
+            <li><strong>Secret Keys (sk_live_)</strong>: Full access operations</li>
+            <li><strong>Scopes</strong>: <code>payments:read</code>, <code>payments:write</code>, <code>webhooks:write</code>, etc.</li>
+            <li><strong>Rate Limits</strong>: Configurable per key (default: 120/minute)</li>
+        </ul>
+
+        <h3>Security Best Practices</h3>
+        <ul>
+            <li>All passwords hashed with bcrypt (cost factor: 12)</li>
+            <li>Sensitive data encrypted at rest using AES-256</li>
+            <li>Regular security audits and penetration testing</li>
+            <li>Compliance with PCI DSS and GDPR requirements</li>
+        </ul>
+
+        <h3>Authentication Flow</h3>
+        <ol>
+            <li>User submits email/password to <code>/auth/login</code></li>
+            <li>System validates credentials against database</li>
+            <li>On success, generates JWT access and refresh tokens</li>
+            <li>Refresh token stored in HttpOnly cookie</li>
+            <li>Access token returned for API requests</li>
+            <li>Refresh token used to obtain new access tokens</li>
+            <li>Logout revokes refresh tokens and clears cookies</li>
+        </ol>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="deployment">
+        <h2>8. Deployment and Infrastructure</h2>
+        <p>Paycrypt employs a modern, scalable cloud infrastructure designed for high availability and performance across global markets.</p>
+        
+        <h3>Frontend Deployment</h3>
+        <ul>
+            <li><strong>Platform</strong>: Vercel (Edge Network)</li>
+            <li><strong>Project</strong>: paycrypt-web-live</li>
+            <li><strong>Global CDN</strong>: Automatic edge distribution</li>
+            <li><strong>Environment</strong>: Production and preview deployments</li>
+        </ul>
+
+        <h3>Backend Deployment</h3>
+        <ul>
+            <li><strong>Platform</strong>: AWS EC2 (ap-south-1 region)</li>
+            <li><strong>Services</strong>: API, WebSocket, Worker, Redis</li>
+            <li><strong>Load Balancer</strong>: Nginx with SSL termination</li>
+            <li><strong>Monitoring</strong>: Custom health checks and telemetry</li>
+        </ul>
+
+        <h3>Database Infrastructure</h3>
+        <ul>
+            <li><strong>Platform</strong>: Supabase (PostgreSQL)</li>
+            <li><strong>Region</strong>: Global with automatic failover</li>
+            <li><strong>Backups</strong>: Automated daily backups with point-in-time recovery</li>
+            <li><strong>Migrations</strong>: Version-controlled schema migrations</li>
+        </ul>
+
+        <h3>Infrastructure Components</h3>
+        <table>
+            <tr><th>Component</th><th>Provider</th><th>Configuration</th><th>Monitoring</th></tr>
+            <tr><td>Frontend</td><td>Vercel</td><td>Edge Network, Auto-scaling</td><td>Real-time logs, Analytics</td></tr>
+            <tr><td>API Server</td><td>AWS EC2</td><td>t3.medium, Auto-scaling</td><td>Health checks, Metrics</td></tr>
+            <tr><td>WebSocket</td><td>AWS EC2</td><td>t3.small, Redis cluster</td><td>Latency monitoring</td></tr>
+            <tr><td>Worker</td><td>AWS EC2</td><td>t3.medium, Queue monitoring</td><td>Job processing metrics</td></tr>
+            <tr><td>Database</td><td>Supabase</td><td>Managed PostgreSQL</td><td>Performance monitoring</td></tr>
+            <tr><td>Cache/Queue</td><td>Redis</td><td>Cluster mode, Persistence</td><td>Memory usage, Latency</td></tr>
+            <tr><td>CDN</td><td>CloudFront</td><td>Edge distribution</td><td>Cache hit ratios</td></tr>
+            <tr><td>DNS</td><td>Route 53</td><td>Health checks, Failover</td><td>Uptime monitoring</td></tr>
+        </table>
+
+        <h3>Environment Configuration</h3>
+        
+        <h4>Development</h4>
+        <ul>
+            <li>Local Docker Compose setup</li>
+            <li>Hot reload for development</li>
+            <li>Test database and Redis instances</li>
+        </ul>
+
+        <h4>Staging</h4>
+        <ul>
+            <li>Mirror of production with test data</li>
+            <li>Full feature testing environment</li>
+            <li>Performance testing capabilities</li>
+        </ul>
+
+        <h4>Production</h4>
+        <ul>
+            <li>Full-scale deployment with monitoring</li>
+            <li>High availability and redundancy</li>
+            <li>Automated scaling and recovery</li>
+        </ul>
+
+        <h3>CI/CD Pipeline</h3>
+        <ul>
+            <li><strong>Frontend</strong>: Automatic Vercel deployment on main branch</li>
+            <li><strong>Backend</strong>: Manual deployment with health checks</li>
+            <li><strong>Database</strong>: Automated migration execution</li>
+            <li><strong>Monitoring</strong>: Post-deployment verification</li>
+        </ul>
+
+        <h3>Monitoring and Observability</h3>
+        <ul>
+            <li><strong>Application metrics</strong>: Custom telemetry collection</li>
+            <li><strong>Infrastructure</strong>: AWS CloudWatch integration</li>
+            <li><strong>Error tracking</strong>: Comprehensive error logging</li>
+            <li><strong>Performance</strong>: Response time and throughput monitoring</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="crypto">
+        <h2>9. Supported Cryptocurrencies and Networks</h2>
+        
+        <h3>Supported Assets</h3>
+        <table>
+            <tr><th>Asset</th><th>Networks</th><th>Settlement Currency</th><th>Wallet Type</th></tr>
+            <tr><td>Bitcoin (BTC)</td><td>Bitcoin</td><td>BTC</td><td>Custodial Only</td></tr>
+            <tr><td>Ethereum (ETH)</td><td>ERC20</td><td>ETH</td><td>Custodial Only</td></tr>
+            <tr><td>Tether (USDT)</td><td>TRC20, ERC20, SOL</td><td>USDT</td><td>Both</td></tr>
+            <tr><td>USDC</td><td>ERC20, SOL</td><td>USDC</td><td>Both</td></tr>
+            <tr><td>Other ERC20</td><td>ERC20</td><td>Various</td><td>Non-Custodial</td></tr>
+            <tr><td>Solana Tokens</td><td>Solana</td><td>Various</td><td>Non-Custodial</td></tr>
+            <tr><td>TRC20 Tokens</td><td>TRC20</td><td>Various</td><td>Non-Custodial</td></tr>
+        </table>
+
+        <h3>Network Infrastructure</h3>
+        
+        <h4>Tron (TRC20)</h4>
+        <ul>
+            <li><strong>RPC Endpoint</strong>: https://api.trongrid.io</li>
+            <li><strong>Confirmation Time</strong>: ~1-2 minutes</li>
+            <li><strong>Fees</strong>: Minimal TRX gas fees</li>
+            <li><strong>Popular for</strong>: USDT transfers</li>
+        </ul>
+
+        <h4>Ethereum (ERC20)</h4>
+        <ul>
+            <li><strong>RPC Endpoint</strong>: https://rpc.ankr.com/eth</li>
+            <li><strong>Confirmation Time</strong>: ~15-30 minutes (depending on gas)</li>
+            <li><strong>Fees</strong>: Variable gas fees</li>
+            <li><strong>Popular for</strong>: USDC, DAI, other stablecoins</li>
+        </ul>
+
+        <h4>Solana</h4>
+        <ul>
+            <li><strong>RPC Endpoint</strong>: https://api.mainnet-beta.solana.com</li>
+            <li><strong>Confirmation Time</strong>: ~2-3 seconds</li>
+            <li><strong>Fees</strong>: Minimal SOL fees</li>
+            <li><strong>Popular for</strong>: USDC, SOL, SPL tokens</li>
+        </ul>
+
+        <h4>Bitcoin</h4>
+        <ul>
+            <li><strong>Native Bitcoin network</strong></li>
+            <li><strong>Confirmation Time</strong>: ~60 minutes</li>
+            <li><strong>Fees</strong>: Variable network fees</li>
+            <li><strong>Custodial only</strong>: Managed through Binance integration</li>
+        </ul>
+
+        <h3>Settlement Processing</h3>
+        <ul>
+            <li><strong>Real-time Processing</strong>: Immediate settlement for supported networks</li>
+            <li><strong>Batch Processing</strong>: Periodic settlement for high-volume transactions</li>
+            <li><strong>Multi-currency Support</strong>: Settlement in original or converted currency</li>
+            <li><strong>Network Optimization</strong>: Automatic routing to lowest-fee networks</li>
+        </ul>
+
+        <h3>Price Oracle Integration</h3>
+        <ul>
+            <li><strong>Source</strong>: CoinGecko API</li>
+            <li><strong>Update Frequency</strong>: Every 5 minutes</li>
+            <li><strong>Pairs</strong>: 50+ cryptocurrency/fiat pairs</li>
+            <li><strong>Fallback</strong>: Multiple oracle providers for reliability</li>
+        </ul>
+
+        <h3>Custodial vs Non-Custodial</h3>
+        
+        <h4>Custodial Model</h4>
+        <ul>
+            <li>Platform manages private keys</li>
+            <li>Binance integration for wallet provisioning</li>
+            <li>Faster settlement and processing</li>
+            <li>Lower complexity for merchants</li>
+        </ul>
+
+        <h4>Non-Custodial Model</h4>
+        <ul>
+            <li>Merchants control their own keys</li>
+            <li>Wallet verification process required</li>
+            <li>Higher security and control</li>
+            <li>Suitable for compliance requirements</li>
+        </ul>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div id="config">
+        <h2>10. Configuration and Environment Setup</h2>
+        
+        <h3>Environment Variables</h3>
+        <table>
+            <tr><th>Category</th><th>Environment Variable</th><th>Purpose</th><th>Example</th></tr>
+            <tr><td>Application</td><td>NODE_ENV</td><td>Environment mode</td><td>development</td></tr>
+            <tr><td>Application</td><td>PORT</td><td>API server port</td><td>4000</td></tr>
+            <tr><td>Application</td><td>WS_PORT</td><td>WebSocket port</td><td>4001</td></tr>
+            <tr><td>Database</td><td>DATABASE_URL</td><td>PostgreSQL connection</td><td>postgresql://...</td></tr>
+            <tr><td>Database</td><td>SUPABASE_URL</td><td>Supabase project URL</td><td>https://...</td></tr>
+            <tr><td>Database</td><td>SUPABASE_SERVICE_ROLE_KEY</td><td>Supabase admin key</td><td>service-role-key</td></tr>
+            <tr><td>Security</td><td>JWT_ACCESS_SECRET</td><td>JWT signing secret</td><td>strong-secret</td></tr>
+            <tr><td>Security</td><td>JWT_REFRESH_SECRET</td><td>Refresh token secret</td><td>strong-secret</td></tr>
+            <tr><td>Security</td><td>WEBHOOK_SIGNING_SECRET</td><td>Webhook HMAC secret</td><td>webhook-secret</td></tr>
+            <tr><td>Security</td><td>ENCRYPTION_KEY</td><td>Data encryption key</td><td>base64-key</td></tr>
+            <tr><td>External</td><td>REDIS_URL</td><td>Redis connection</td><td>redis://localhost:6379</td></tr>
+            <tr><td>External</td><td>BINANCE_API_KEY</td><td>Binance API key</td><td>api-key</td></tr>
+            <tr><td>External</td><td>BINANCE_API_SECRET</td><td>Binance secret</td><td>api-secret</td></tr>
+            <tr><td>External</td><td>ETHEREUM_RPC_URL</td><td>Ethereum RPC</td><td>https://rpc.ankr.com/eth</td></tr>
+            <tr><td>External</td><td>SOLANA_RPC_URL</td><td>Solana RPC</td><td>https://api.mainnet-beta.solana.com</td></tr>
+            <tr><td>External</td><td>PRICE_ORACLE_BASE_URL</td><td>Price oracle</td><td>https://api.coingecko.com</td></tr>
+        </table>
+
+        <h3>Local Development Setup</h3>
+        
+        <h4>Prerequisites</h4>
+        <ul>
+            <li>Node.js 18+ and npm</li>
+            <li>Docker and Docker Compose</li>
+            <li>PostgreSQL client tools</li>
+            <li>Redis server</li>
+        </ul>
+
+        <h4>Setup Steps</h4>
+        <ol>
+            <li>Clone repository and navigate to root directory</li>
+            <li>Copy <code>.env.example</code> to <code>.env</code> and configure variables</li>
+            <li>Install dependencies: <code>npm install</code></li>
+            <li>Run database migrations: <code>npm run migrate:db</code></li>
+            <li>Seed demo data: <code>npm run seed:demo</code></li>
+            <li>Start services: <code>npm run dev:api</code>, <code>npm run dev:ws</code>, <code>npm run dev:web</code></li>
+        </ol>
+
+        <h4>Service URLs</h4>
+        <ul>
+            <li><strong>Frontend</strong>: http://localhost:3003</li>
+            <li><strong>API</strong>: http://localhost:4000</li>
+            <li><strong>WebSocket</strong>: http://localhost:4001</li>
+            <li><strong>Redis</strong>: localhost:6379</li>
+        </ul>
+
+        <h4>Docker Development</h4>
+        <ul>
+            <li>Use <code>docker-compose.yml</code> for full stack development</li>
+            <li>Includes nginx, redis, and all application services</li>
+            <li>Automatic health checks and service dependencies</li>
+            <li>Volume mounts for live code reloading</li>
+        </ul>
+
+        <h3>Production Configuration</h3>
+        
+        <h4>Security Requirements</h4>
+        <ul>
+            <li>All secrets must be strong and unique</li>
+            <li>HTTPS/WSS required for all communications</li>
+            <li>Regular key rotation recommended</li>
+            <li>Environment variables should be managed securely</li>
+        </ul>
+
+        <h4>Performance Optimization</h4>
+        <ul>
+            <li>Redis cluster for high availability</li>
+            <li>Database connection pooling</li>
+            <li>CDN configuration for static assets</li>
+            <li>Load balancing for API services</li>
+        </ul>
+
+        <h4>Monitoring and Logging</h4>
+        <ul>
+            <li>Structured logging with correlation IDs</li>
+            <li>Performance metrics collection</li>
+            <li>Error tracking and alerting</li>
+            <li>Health check endpoints</li>
+        </ul>
+
+        <h4>Backup and Recovery</h4>
+        <ul>
+            <li>Automated database backups</li>
+            <li>Configuration version control</li>
+            <li>Disaster recovery procedures</li>
+            <li>Regular restore testing</li>
+        </ul>
+
+        <h3>Demo Credentials</h3>
+        <ul>
+            <li><strong>Merchant</strong>: <code>owner@nebula.dev</code> / <code>ChangeMe123!</code></li>
+            <li><strong>Admin</strong>: <code>admin@cryptopay.dev</code> / <code>AdminChangeMe123!</code></li>
+        </ul>
+
+        <p>New merchants created by the admin panel receive a temporary password and are forced through first-login password setup before dashboard access is allowed.</p>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="footer">
+        <h2>Conclusion</h2>
+        <p>Paycrypt represents a comprehensive, enterprise-grade solution for cryptocurrency payment processing. Its architecture combines modern web technologies with robust security practices and scalable infrastructure design.</p>
+        
+        <h3>Key Strengths</h3>
+        <ul>
+            <li>Comprehensive feature set covering all aspects of crypto payment processing</li>
+            <li>Flexible architecture supporting both custodial and non-custodial models</li>
+            <li>Developer-friendly API design with extensive documentation and SDK support</li>
+            <li>Enterprise-grade security with proper authentication and authorization</li>
+            <li>Scalable infrastructure designed for global deployment</li>
+            <li>Real-time processing capabilities enhancing user experience</li>
+            <li>Extensive monitoring and observability features</li>
+        </ul>
+
+        <h3>Future Enhancements</h3>
+        <ul>
+            <li>Additional blockchain network support</li>
+            <li>Advanced fraud detection and risk management</li>
+            <li>Enhanced analytics and reporting capabilities</li>
+            <li>Mobile SDK development</li>
+            <li>DeFi protocol integration</li>
+        </ul>
+
+        <p>This platform provides a solid foundation for businesses seeking to integrate cryptocurrency payments into their operations while maintaining security, compliance, and user experience standards.</p>
+        
+        <hr>
+        <p><em>Generated on: April 23, 2026</em></p>
+        <p><em>Paycrypt - Crypto Payment Gateway SaaS Platform</em></p>
+    </div>
+
+</body>
+</html>

@@ -7,6 +7,8 @@ type PaymentRow = {
   network: string;
   wallet_address: string;
   wallet_routes: Record<string, { asset: string; network: string; address: string; provider?: string; walletType?: string }>;
+  binance_api_key_enc?: string | null;
+  binance_api_secret_enc?: string | null;
   status: string;
   amount_crypto?: string;
   created_at: string;
@@ -63,6 +65,8 @@ const binanceBaseUrl = process.env.BINANCE_BASE_URL ?? "https://api.binance.com"
 const tronBaseUrl = process.env.TRONGRID_BASE_URL ?? "https://api.trongrid.io";
 const ethereumRpcUrl = process.env.ETHEREUM_RPC_URL ?? "https://rpc.ankr.com/eth";
 const solanaRpcUrl = process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+const encryptionSeed = process.env.ENCRYPTION_KEY ?? "";
+const encryptionKey = encryptionSeed ? crypto.scryptSync(encryptionSeed, "cryptopay-webhook", 32) : null;
 
 const erc20UsdtContract = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a6fca4d6b3";
@@ -81,6 +85,41 @@ const networkMap: Record<string, string> = {
   ERC20: "ETH",
   TRC20: "TRX",
   SOL: "SOL"
+};
+
+const decryptSecret = (value: string) => {
+  if (!encryptionKey) return null;
+  try {
+    const payload = Buffer.from(value, "base64");
+    const iv = payload.subarray(0, 12);
+    const tag = payload.subarray(12, 28);
+    const data = payload.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
+const resolveBinanceCredentials = (payment: PaymentRow) => {
+  const merchantApiKey = payment.binance_api_key_enc ? decryptSecret(payment.binance_api_key_enc)?.trim() : null;
+  const merchantApiSecret = payment.binance_api_secret_enc
+    ? decryptSecret(payment.binance_api_secret_enc)?.trim()
+    : null;
+  if (merchantApiKey && merchantApiSecret) {
+    return {
+      apiKey: merchantApiKey,
+      apiSecret: merchantApiSecret
+    };
+  }
+
+  const apiKey = process.env.BINANCE_API_KEY?.trim();
+  const apiSecret = process.env.BINANCE_API_SECRET?.trim();
+  if (!apiKey || !apiSecret) {
+    return null;
+  }
+  return { apiKey, apiSecret };
 };
 
 const jsonRpc = async <T>(url: string, method: string, params: unknown[] = []) => {
@@ -323,9 +362,8 @@ const monitorTron = async (payment: PaymentRow): Promise<ProviderObservation | n
 };
 
 const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation | null> => {
-  const apiKey = process.env.BINANCE_API_KEY;
-  const apiSecret = process.env.BINANCE_API_SECRET;
-  if (!apiKey || !apiSecret) {
+  const credentials = resolveBinanceCredentials(payment);
+  if (!credentials) {
     return null;
   }
 
@@ -333,12 +371,13 @@ const monitorBinance = async (payment: PaymentRow): Promise<ProviderObservation 
   const query = new URLSearchParams({
     coin: payment.settlement_currency,
     startTime: String(Math.max(paymentCreatedAt(payment) - paymentTimeDriftMs, 0)),
+    recvWindow: "60000",
     timestamp: String(timestamp)
   });
-  const hash = crypto.createHmac("sha256", apiSecret).update(query.toString()).digest("hex");
+  const hash = crypto.createHmac("sha256", credentials.apiSecret).update(query.toString()).digest("hex");
   const response = await fetch(`${binanceBaseUrl}/sapi/v1/capital/deposit/hisrec?${query.toString()}&signature=${hash}`, {
     headers: {
-      "X-MBX-APIKEY": apiKey
+      "X-MBX-APIKEY": credentials.apiKey
     }
   });
   if (!response.ok) {
