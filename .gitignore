@@ -18,3 +18,7 @@ packages/sdk/dist
 packages/shared/dist
 
 .vercel
+infrastructure/terraform/.terraform
+infrastructure/terraform/terraform.tfstate
+infrastructure/terraform/tfplan
+infrastructure/terraform/.terraform.lock.hcl
