@@ -41,6 +41,7 @@ import {
 import { AppError } from "./errors.js";
 import { quoteCryptoAmount } from "./pricing.js";
 import { recordPaymentStatus } from "./telemetry.js";
+import { deductPlatformFee, processSettlement } from "./treasury.js";
 
 export const persistResponse = <T>(payload: T) => payload;
 export { listBillingInvoices };
@@ -790,6 +791,59 @@ export const changePaymentStatus = async (
      where id = $1`,
     [paymentId, status, txHash ?? null, confirmations]
   );
+
+  // Deduct platform fee when payment is confirmed
+  if (status === "confirmed") {
+    const payment = await query<{
+      amount_fiat: number;
+      amount_crypto: number;
+      exchange_rate: number;
+      settlement_currency: string;
+      network: string;
+      metadata: Record<string, unknown>;
+    }>(
+      `select amount_fiat, amount_crypto, exchange_rate, settlement_currency, network, metadata
+       from payments where id = $1 limit 1`,
+      [paymentId]
+    );
+
+    if (payment.rows[0]) {
+      const p = payment.rows[0];
+      const metadata = p.metadata as { platformFeePercent?: number; platformFeeAmountFiat?: number };
+      const feePercent = metadata.platformFeePercent ?? 1;
+
+      try {
+        const feeResult = await deductPlatformFee(
+          paymentId,
+          merchantId,
+          p.settlement_currency,
+          p.network,
+          p.amount_crypto,
+          p.amount_fiat,
+          p.exchange_rate,
+          feePercent
+        );
+
+        // Process settlement to move funds from pending to withdrawable
+        try {
+          await processSettlement(
+            paymentId,
+            merchantId,
+            p.settlement_currency,
+            p.network,
+            feeResult.netAmountCrypto,
+            feeResult.netAmountFiat
+          );
+        } catch (settlementError) {
+          console.error("Failed to process settlement:", settlementError);
+          // Don't fail the payment status change if settlement processing fails
+        }
+      } catch (error) {
+        console.error("Failed to deduct platform fee:", error);
+        // Don't fail the payment status change if fee deduction fails
+      }
+    }
+  }
 
   const eventType = `payment.${status}` as RealtimeEventName;
   emitPaymentEvent({ type: eventType, paymentId, merchantId, status, txHash, confirmations });

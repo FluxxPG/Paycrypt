@@ -33,6 +33,16 @@ import {
   updateMerchantWalletAccess,
   updateWalletForAdmin
 } from "../lib/services.js";
+import {
+  getPlatformTreasurySummary,
+  approveWithdrawal,
+  rejectWithdrawal,
+  processWithdrawal,
+  createTreasuryAdjustment,
+  approveTreasuryAdjustment,
+  listWithdrawalRequests,
+  listTreasuryAdjustments
+} from "../lib/treasury.js";
 
 export const adminRouter = Router();
 
@@ -565,5 +575,96 @@ adminRouter.get("/custody/deposits", requireAdmin(true), async (req, res) => {
     res.json({ deposits });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch Binance deposits", error: (error as Error).message });
+  }
+});
+
+// Treasury Management Routes
+adminRouter.get("/treasury", requireAdmin(true), async (_req, res) => {
+  try {
+    const summary = await getPlatformTreasurySummary();
+    res.json({ data: summary });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch treasury summary", error: (error as Error).message });
+  }
+});
+
+adminRouter.get("/treasury/withdrawals", requireAdmin(true), async (_req, res) => {
+  try {
+    const withdrawals = await listWithdrawalRequests();
+    res.json({ data: withdrawals });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch withdrawal requests", error: (error as Error).message });
+  }
+});
+
+adminRouter.post("/treasury/withdrawals/:id/approve", requireAdmin(true), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const withdrawalId = Array.isArray(id) ? id[0] : id;
+    const actorId = (req as any).user.id;
+    await approveWithdrawal(withdrawalId, actorId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to approve withdrawal", error: (error as Error).message });
+  }
+});
+
+adminRouter.post("/treasury/withdrawals/:id/reject", requireAdmin(true), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const withdrawalId = Array.isArray(id) ? id[0] : id;
+    const { rejectionReason } = req.body as { rejectionReason: string };
+    const actorId = (req as any).user.id;
+    await rejectWithdrawal(withdrawalId, rejectionReason, actorId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to reject withdrawal", error: (error as Error).message });
+  }
+});
+
+adminRouter.post("/treasury/withdrawals/:id/process", requireAdmin(true), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const withdrawalId = Array.isArray(id) ? id[0] : id;
+    const actorId = (req as any).user.id;
+    const result = await processWithdrawal(withdrawalId, actorId);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to process withdrawal", error: (error as Error).message });
+  }
+});
+
+adminRouter.get("/treasury/adjustments", requireAdmin(true), async (_req, res) => {
+  try {
+    const adjustments = await listTreasuryAdjustments();
+    res.json({ data: adjustments });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch treasury adjustments", error: (error as Error).message });
+  }
+});
+
+adminRouter.post("/treasury/adjustments", requireAdmin(true), async (req, res) => {
+  try {
+    const actorId = (req as any).user.id;
+    const input = {
+      ...req.body,
+      performedBy: actorId
+    };
+    const adjustment = await createTreasuryAdjustment(input);
+    res.json({ data: adjustment });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create treasury adjustment", error: (error as Error).message });
+  }
+});
+
+adminRouter.post("/treasury/adjustments/:id/approve", requireAdmin(true), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adjustmentId = Array.isArray(id) ? id[0] : id;
+    const actorId = (req as any).user.id;
+    const result = await approveTreasuryAdjustment(adjustmentId, actorId);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to approve treasury adjustment", error: (error as Error).message });
   }
 });

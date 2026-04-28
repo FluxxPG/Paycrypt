@@ -242,7 +242,7 @@ resource "aws_s3_bucket_policy" "alb_logs" {
 # ALB Target Groups
 resource "aws_lb_target_group" "api_gateway" {
   name        = "${var.project_name}-api-gateway-tg"
-  port        = 3000
+  port        = 4000
   protocol    = "HTTP"
   vpc_id      = module.vpc.vpc_id
   target_type = "ip"
@@ -348,7 +348,7 @@ resource "aws_ecs_task_definition" "api_gateway" {
       essential = true
       portMappings = [
         {
-          containerPort = 3000
+          containerPort = 4000
           protocol      = "tcp"
         }
       ]
@@ -385,7 +385,7 @@ resource "aws_ecs_task_definition" "api_gateway" {
         }
       }
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+        command     = ["CMD-SHELL", "curl -f http://localhost:4000/health || exit 1"]
         interval    = 30
         timeout     = 5
         retries     = 3

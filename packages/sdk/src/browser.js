@@ -8,6 +8,8 @@
       this.baseUrl = config.baseUrl || 'https://api.paycrypt.com';
       this.apiKey = config.apiKey;
       this.isProduction = config.environment === 'production';
+      this.websocket = null;
+      this.eventListeners = new Map();
     }
 
     // Create payment with automatic method detection
@@ -379,6 +381,136 @@
       return `browser_${timestamp}_${random}`;
     }
 
+    // Connect to WebSocket for real-time payment updates
+    connectWebSocket(paymentId, callbacks = {}) {
+      const wsUrl = this.baseUrl.replace('http', 'ws') + `/ws/payments/${paymentId}`;
+
+      this.websocket = new WebSocket(wsUrl);
+
+      this.websocket.onopen = () => {
+        console.log('WebSocket connected for payment:', paymentId);
+        if (callbacks.onConnect) callbacks.onConnect();
+      };
+
+      this.websocket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (callbacks.onMessage) callbacks.onMessage(data);
+
+          // Auto-handle payment status changes
+          if (data.type === 'payment.confirmed' && callbacks.onConfirmed) {
+            callbacks.onConfirmed(data);
+          } else if (data.type === 'payment.failed' && callbacks.onFailed) {
+            callbacks.onFailed(data);
+          } else if (data.type === 'payment.expired' && callbacks.onExpired) {
+            callbacks.onExpired(data);
+          }
+        } catch (error) {
+          console.error('WebSocket message error:', error);
+        }
+      };
+
+      this.websocket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        if (callbacks.onError) callbacks.onError(error);
+      };
+
+      this.websocket.onclose = () => {
+        console.log('WebSocket disconnected for payment:', paymentId);
+        if (callbacks.onDisconnect) callbacks.onDisconnect();
+      };
+
+      return this.websocket;
+    }
+
+    // Disconnect WebSocket
+    disconnectWebSocket() {
+      if (this.websocket) {
+        this.websocket.close();
+        this.websocket = null;
+      }
+    }
+
+    // Add event listener for payment events
+    on(event, callback) {
+      if (!this.eventListeners.has(event)) {
+        this.eventListeners.set(event, []);
+      }
+      this.eventListeners.get(event).push(callback);
+    }
+
+    // Remove event listener
+    off(event, callback) {
+      if (this.eventListeners.has(event)) {
+        const listeners = this.eventListeners.get(event);
+        const index = listeners.indexOf(callback);
+        if (index > -1) {
+          listeners.splice(index, 1);
+        }
+      }
+    }
+
+    // Emit event to listeners
+    emit(event, data) {
+      if (this.eventListeners.has(event)) {
+        this.eventListeners.get(event).forEach(callback => callback(data));
+      }
+    }
+
+    // Create payment link
+    async createPaymentLink(linkData, options = {}) {
+      try {
+        const endpoint = `${this.baseUrl}/v1/payment_links`;
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+          ...(options.idempotencyKey && { 'Idempotency-Key': options.idempotencyKey })
+        };
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(linkData)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || 'Payment link creation failed');
+        }
+
+        return data;
+      } catch (error) {
+        throw new Error(`Payment link creation failed: ${error.message}`);
+      }
+    }
+
+    // Get payment status
+    async getPaymentStatus(paymentId) {
+      try {
+        const endpoint = `${this.baseUrl}/v1/payments/${paymentId}`;
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        };
+
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to fetch payment status');
+        }
+
+        return data;
+      } catch (error) {
+        throw new Error(`Failed to fetch payment status: ${error.message}`);
+      }
+    }
+
     // SDK info
     static getInfo() {
       return {
@@ -394,7 +526,9 @@
           'Enhanced Error Handling',
           'Mobile Optimization',
           'Browser Compatibility',
-          'Production-ready Security'
+          'Production-ready Security',
+          'Event-driven Architecture',
+          'Treasury Integration'
         ],
         supportedMethods: ['crypto', 'upi'],
         supportedUPIProviders: ['phonepe', 'paytm', 'razorpay', 'freecharge'],

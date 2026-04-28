@@ -1,0 +1,17 @@
+{
+  "name": "@cryptopay/shopify-plugin",
+  "version": "1.0.0",
+  "description": "Paycrypt Shopify Plugin for Crypto and UPI Payments",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@cryptopay/sdk": "1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^20.0.0"
+  }
+}

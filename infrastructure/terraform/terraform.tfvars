@@ -14,8 +14,8 @@ database_subnet_cidrs = ["10.0.201.0/24", "10.0.202.0/24", "10.0.203.0/24"]
 # ACM Certificate (empty for now, can be added later)
 acm_certificate_arn = ""
 
-# ECR Repository (empty for now, will be created separately)
-ecr_repository_url = ""
+# ECR Repository URL
+ecr_repository_url = "359924468730.dkr.ecr.ap-south-1.amazonaws.com/paycrypt"
 image_tag = "latest"
 
 # API Gateway Configuration

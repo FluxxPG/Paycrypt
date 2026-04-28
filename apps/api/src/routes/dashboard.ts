@@ -33,6 +33,42 @@ import {
 import { upiPaymentService } from "../lib/upi-services.js";
 import { getMerchantBillingContext } from "../lib/billing.js";
 import { supportedAssets, supportedNetworks } from "@cryptopay/shared";
+import {
+  getMerchantTreasurySummary,
+  createWithdrawalRequest,
+  listWithdrawalRequests,
+  listTreasuryAdjustments
+} from "../lib/treasury.js";
+import {
+  createSSOApplication,
+  getSSOApplication,
+  generateAuthorizationCode,
+  validateAuthorizationCode,
+  generateAccessToken,
+  generateRefreshToken,
+  validateAccessToken,
+  refreshAccessToken,
+  createSSOSession,
+  validateSSOSession,
+  revokeSSOSession,
+  listSSOApplications,
+  deleteSSOApplication
+} from "../lib/sso.js";
+import {
+  createBatchPayout,
+  processBatchPayout,
+  getBatchPayout,
+  listBatchPayouts,
+  cancelBatchPayout
+} from "../lib/batch-payout.js";
+import {
+  createAutomationRule,
+  evaluateAutomationRules,
+  listAutomationRules,
+  updateAutomationRule,
+  deleteAutomationRule,
+  getAutomationRule
+} from "../lib/automation.js";
 
 export const dashboardRouter = Router();
 
@@ -638,6 +674,301 @@ dashboardRouter.post("/webhooks/:id/rotate", async (req, res) => {
   const responsePayload = await rotateWebhookEndpointSecret(merchantId, req.params.id);
   res.locals.responsePayload = responsePayload;
   res.json(responsePayload);
+});
+
+// Treasury Management Routes for Merchants
+dashboardRouter.get("/treasury", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const summary = await getMerchantTreasurySummary(merchantId);
+    res.json({ data: summary });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch treasury summary", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/treasury/withdrawals", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const input = {
+      ...req.body,
+      ownerType: "merchant" as const,
+      ownerId: merchantId
+    };
+    const result = await createWithdrawalRequest(input.ownerType, input.ownerId, input);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create withdrawal request", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/treasury/withdrawals", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const withdrawals = await listWithdrawalRequests("merchant", merchantId);
+    res.json({ data: withdrawals });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch withdrawal requests", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/treasury/adjustments", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const adjustments = await listTreasuryAdjustments("merchant", merchantId);
+    res.json({ data: adjustments });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch treasury adjustments", error: (error as Error).message });
+  }
+});
+
+// SSO Management Routes
+dashboardRouter.get("/sso/applications", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const applications = await listSSOApplications(merchantId);
+    res.json({ data: applications });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch SSO applications", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/sso/applications", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const input = {
+      ...req.body,
+      merchantId
+    };
+    const application = await createSSOApplication(input);
+    res.json({ data: application });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create SSO application", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.delete("/sso/applications/:clientId", async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const clientIdStr = Array.isArray(clientId) ? clientId[0] : clientId;
+    await deleteSSOApplication(clientIdStr);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete SSO application", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/sso/authorize", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const userId = (req as any).user.id;
+  try {
+    const { clientId, redirectUri, scopes } = req.body as { clientId: string; redirectUri: string; scopes: string[] };
+    const code = await generateAuthorizationCode({ clientId, merchantId, userId, redirectUri, scopes });
+    res.json({ data: { code } });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to generate authorization code", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/sso/token", async (req, res) => {
+  try {
+    const { grantType, code, clientId, redirectUri, refreshToken } = req.body;
+
+    if (grantType === "authorization_code") {
+      const authCode = await validateAuthorizationCode(code, clientId);
+      if (!authCode) {
+        return res.status(400).json({ message: "Invalid or expired authorization code" });
+      }
+
+      // Mark code as used
+      await query(`update sso_authorization_codes set used_at = now() where id = $1`, [authCode.id]);
+
+      const accessToken = await generateAccessToken({
+        clientId,
+        merchantId: authCode.merchant_id,
+        userId: authCode.user_id,
+        scopes: authCode.scopes
+      });
+
+      const refreshTokenResult = await generateRefreshToken({
+        accessTokenId: accessToken.accessTokenId,
+        clientId,
+        merchantId: authCode.merchant_id,
+        userId: authCode.user_id
+      });
+
+      res.json({
+        data: {
+          accessToken: accessToken.accessToken,
+          refreshToken: refreshTokenResult.refreshToken,
+          expiresAt: accessToken.expiresAt
+        }
+      });
+    } else if (grantType === "refresh_token") {
+      const tokens = await refreshAccessToken(refreshToken);
+      res.json({ data: tokens });
+    } else {
+      res.status(400).json({ message: "Invalid grant type" });
+    }
+  } catch (error) {
+    res.status(500).json({ message: "Failed to generate access token", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/sso/session", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  const userId = (req as any).user.id;
+  try {
+    const { clientId } = req.body as { clientId?: string };
+    const ipAddress = req.ip;
+    const userAgent = req.headers["user-agent"];
+    const session = await createSSOSession({ merchantId, userId, clientId, ipAddress, userAgent });
+    res.json({ data: session });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create SSO session", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.delete("/sso/session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const sessionIdStr = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+    await revokeSSOSession(sessionIdStr);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to revoke SSO session", error: (error as Error).message });
+  }
+});
+
+// Batch Payout Routes
+dashboardRouter.post("/batch-payouts", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const input = {
+      ...req.body,
+      merchantId
+    };
+    const batch = await createBatchPayout(input);
+    res.json({ data: batch });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create batch payout", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/batch-payouts", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const batches = await listBatchPayouts(merchantId);
+    res.json({ data: batches });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch batch payouts", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/batch-payouts/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const batchIdStr = Array.isArray(batchId) ? batchId[0] : batchId;
+    const batch = await getBatchPayout(batchIdStr);
+    res.json({ data: batch });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch batch payout", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/batch-payouts/:batchId/process", async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const batchIdStr = Array.isArray(batchId) ? batchId[0] : batchId;
+    const actorId = (req as any).user.id;
+    const result = await processBatchPayout(batchIdStr, actorId);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to process batch payout", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/batch-payouts/:batchId/cancel", async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const batchIdStr = Array.isArray(batchId) ? batchId[0] : batchId;
+    const actorId = (req as any).user.id;
+    const result = await cancelBatchPayout(batchIdStr, actorId);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to cancel batch payout", error: (error as Error).message });
+  }
+});
+
+// Automation Rules Routes
+dashboardRouter.post("/automation-rules", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const input = {
+      ...req.body,
+      merchantId
+    };
+    const rule = await createAutomationRule(input);
+    res.json({ data: rule });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create automation rule", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/automation-rules", async (req, res) => {
+  const merchantId = (req as any).actor.merchantId;
+  try {
+    const rules = await listAutomationRules(merchantId);
+    res.json({ data: rules });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch automation rules", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.get("/automation-rules/:ruleId", async (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    const ruleIdStr = Array.isArray(ruleId) ? ruleId[0] : ruleId;
+    const rule = await getAutomationRule(ruleIdStr);
+    if (!rule) {
+      return res.status(404).json({ message: "Automation rule not found" });
+    }
+    res.json({ data: rule });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch automation rule", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.put("/automation-rules/:ruleId", async (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    const ruleIdStr = Array.isArray(ruleId) ? ruleId[0] : ruleId;
+    const rule = await updateAutomationRule(ruleIdStr, req.body);
+    res.json({ data: rule });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update automation rule", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.delete("/automation-rules/:ruleId", async (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    const ruleIdStr = Array.isArray(ruleId) ? ruleId[0] : ruleId;
+    await deleteAutomationRule(ruleIdStr);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete automation rule", error: (error as Error).message });
+  }
+});
+
+dashboardRouter.post("/automation-rules/evaluate", async (req, res) => {
+  try {
+    const { eventType, eventData } = req.body;
+    const results = await evaluateAutomationRules(eventType, eventData);
+    res.json({ data: results });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to evaluate automation rules", error: (error as Error).message });
+  }
 });
 
 dashboardRouter.post("/api-keys/:id/rotate", async (req, res) => {

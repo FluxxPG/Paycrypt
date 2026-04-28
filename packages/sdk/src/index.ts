@@ -11,6 +11,34 @@ export interface CryptoPayClientOptions {
   fetcher?: typeof fetch;
 }
 
+export interface TreasuryBalance {
+  balance_type: string;
+  asset: string;
+  network: string;
+  amount_crypto: number;
+  amount_fiat_equivalent: number;
+}
+
+export interface TreasuryWithdrawal {
+  id: string;
+  asset: string;
+  network: string;
+  amount_crypto: number;
+  amount_fiat_equivalent: number;
+  final_amount_crypto: number;
+  destination_address: string;
+  status: string;
+  created_at: string;
+}
+
+export interface CreateWithdrawalInput {
+  asset: string;
+  network: string;
+  amountCrypto: number;
+  destinationAddress: string;
+  destinationWalletProvider?: string;
+}
+
 export class CryptoPayError extends Error {
   constructor(
     message: string,
@@ -42,6 +70,13 @@ export class CryptoPayClient {
     settlements: {
       list: () => this.settlementsList()
     }
+  };
+
+  readonly treasury = {
+    getSummary: () => this.treasuryGetSummary(),
+    createWithdrawal: (input: CreateWithdrawalInput) => this.treasuryCreateWithdrawal(input),
+    listWithdrawals: () => this.treasuryListWithdrawals(),
+    listAdjustments: () => this.treasuryListAdjustments()
   };
 
   constructor(private readonly options: CryptoPayClientOptions) {
@@ -81,6 +116,34 @@ export class CryptoPayClient {
 
   async settlementsList() {
     return this.request<{ data: SettlementRecord[] }>("/v1/settlements", {
+      method: "GET"
+    });
+  }
+
+  async treasuryGetSummary() {
+    return this.request<{ data: { balances: TreasuryBalance[]; withdrawals: TreasuryWithdrawal[]; transactions: unknown[] } }>(
+      "/dashboard/treasury",
+      {
+        method: "GET"
+      }
+    );
+  }
+
+  async treasuryCreateWithdrawal(input: CreateWithdrawalInput) {
+    return this.request<{ data: { withdrawalId: string; fees: unknown } }>("/dashboard/treasury/withdrawals", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async treasuryListWithdrawals() {
+    return this.request<{ data: TreasuryWithdrawal[] }>("/dashboard/treasury/withdrawals", {
+      method: "GET"
+    });
+  }
+
+  async treasuryListAdjustments() {
+    return this.request<{ data: unknown[] }>("/dashboard/treasury/adjustments", {
       method: "GET"
     });
   }
