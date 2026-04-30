@@ -1,8 +1,10 @@
-import "dotenv/config";
+import { loadRepoEnv } from "./load-env.mjs";
 import dns from "node:dns";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
+
+loadRepoEnv();
 
 const originalLookup = dns.lookup.bind(dns);
 dns.lookup = (hostname, options, callback) => {
@@ -42,7 +44,7 @@ async function main() {
   await db.query(
     `insert into merchants (id, name, slug, email, status, custodial_enabled, non_custodial_enabled)
      values
-     ($1, 'Demo Merchant', 'demo-merchant', 'owner@nebula.dev', 'active', true, false),
+     ($1, 'Nebula Commerce', 'nebula-commerce', 'owner@nebula.dev', 'active', true, false),
      ($2, 'Platform Admin', 'platform-admin', 'admin@cryptopay.dev', 'active', true, false)
      on conflict (id) do update set
        name = excluded.name,
@@ -91,7 +93,7 @@ async function main() {
     [
       `usr_${nanoid(12)}`,
       merchantId,
-      "Demo Merchant",
+      "Nebula Commerce Owner",
       "owner@nebula.dev",
       merchantPassword,
       `usr_${nanoid(12)}`,

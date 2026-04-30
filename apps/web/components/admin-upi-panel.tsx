@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Shield, Users, TrendingUp, AlertTriangle, CheckCircle, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle, RefreshCw, Search, Shield, TrendingUp, Users } from "lucide-react";
 import { apiFetch } from "../lib/authed-fetch";
-import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 
@@ -16,7 +15,7 @@ type UPIMerchantStats = {
   successRate: number;
   totalVolume: number;
   lastActivity: string;
-  plan?: string;
+  plan?: "free" | "premium" | "custom" | string;
   providerLimit?: number;
 };
 
@@ -25,9 +24,8 @@ type UPIProviderStats = {
   totalMerchants: number;
   activeMerchants?: number;
   testedMerchants?: number;
-  totalTransactions: number;
+  totalTransactions?: number;
   successRate: number;
-  averageProcessingTime?: number;
   status: "healthy" | "degraded" | "down";
 };
 
@@ -41,6 +39,18 @@ type UPIGlobalStats = {
   dailyVolume: number;
 };
 
+const planBadgeClass = (plan: string) => {
+  if (plan === "custom") return "bg-violet-400/20 text-violet-200";
+  if (plan === "premium") return "bg-blue-400/20 text-blue-200";
+  return "bg-slate-700 text-slate-200";
+};
+
+const providerStatusClass = (status: string) => {
+  if (status === "healthy") return "bg-emerald-400/20 text-emerald-200";
+  if (status === "degraded") return "bg-amber-400/20 text-amber-100";
+  return "bg-rose-400/20 text-rose-200";
+};
+
 export const AdminUPIPanel = () => {
   const [globalStats, setGlobalStats] = useState<UPIGlobalStats | null>(null);
   const [merchantStats, setMerchantStats] = useState<UPIMerchantStats[]>([]);
@@ -50,12 +60,8 @@ export const AdminUPIPanel = () => {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
-  const [planFilter, setPlanFilter] = useState<"all" | "starter" | "custom_selective" | "custom_enterprise">("all");
+  const [planFilter, setPlanFilter] = useState<"all" | "free" | "premium" | "custom">("all");
   const [providerLimitDraft, setProviderLimitDraft] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    fetchStats();
-  }, []);
 
   const fetchStats = async () => {
     setError(null);
@@ -94,24 +100,24 @@ export const AdminUPIPanel = () => {
             successRate,
             activeMerchants,
             testedMerchants: Number(provider.testedMerchants ?? 0),
-            averageProcessingTime: Number(provider.averageProcessingTime ?? 0),
             status
           };
         })
       );
       setProviderLimitDraft(
-        Object.fromEntries(
-          merchants.map((merchant) => [merchant.merchantId, String(merchant.providerLimit ?? 0)])
-        )
+        Object.fromEntries(merchants.map((merchant) => [merchant.merchantId, String(merchant.providerLimit ?? 0)]))
       );
-    } catch (error) {
-      console.error("Failed to fetch UPI stats:", error);
-      setError(error instanceof Error ? error.message : "Failed to load UPI management data");
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "Failed to load UPI management data");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    void fetchStats();
+  }, []);
 
   const refreshStats = async () => {
     setRefreshing(true);
@@ -124,40 +130,39 @@ export const AdminUPIPanel = () => {
         method: "POST",
         body: JSON.stringify({ enabled: true, providerLimit })
       });
-      fetchStats();
-    } catch (error) {
-      alert("Failed to approve UPI access");
+      await fetchStats();
+    } catch {
+      setError("Failed to approve UPI access");
     }
   };
 
   const revokeMerchantUPI = async (merchantId: string) => {
-    if (!confirm("Revoke UPI access for this merchant?")) return;
-    
     try {
       await apiFetch(`/admin/upi/merchants/${merchantId}/approve-upi`, {
         method: "POST",
         body: JSON.stringify({ enabled: false })
       });
-      fetchStats();
-    } catch (error) {
-      alert("Failed to revoke UPI access");
+      await fetchStats();
+    } catch {
+      setError("Failed to revoke UPI access");
     }
   };
 
-  const upgradeMerchantPlan = async (merchantId: string, newPlan: string) => {
+  const upgradeMerchantPlan = async (merchantId: string, plan: "free" | "premium" | "custom") => {
     try {
       await apiFetch(`/admin/upi/merchants/${merchantId}/upgrade-plan`, {
         method: "POST",
-        body: JSON.stringify({ plan: newPlan })
+        body: JSON.stringify({ plan })
       });
-      fetchStats();
-    } catch (error) {
-      alert("Failed to upgrade merchant plan");
+      await fetchStats();
+    } catch {
+      setError("Failed to upgrade merchant plan");
     }
   };
 
   const filteredMerchants = useMemo(() => {
     return merchantStats.filter((merchant) => {
+      const normalizedPlan = (merchant.plan || "free") as "free" | "premium" | "custom";
       const matchesSearch =
         !search.trim() ||
         merchant.merchantName.toLowerCase().includes(search.toLowerCase()) ||
@@ -166,11 +171,10 @@ export const AdminUPIPanel = () => {
         statusFilter === "all" ||
         (statusFilter === "enabled" && merchant.upiEnabled) ||
         (statusFilter === "disabled" && !merchant.upiEnabled);
-      const normalizedPlan = (merchant.plan || "starter") as "starter" | "custom_selective" | "custom_enterprise";
       const matchesPlan = planFilter === "all" || normalizedPlan === planFilter;
       return matchesSearch && matchesStatus && matchesPlan;
     });
-  }, [merchantStats, search, statusFilter, planFilter]);
+  }, [merchantStats, planFilter, search, statusFilter]);
 
   if (loading) {
     return (
@@ -186,7 +190,6 @@ export const AdminUPIPanel = () => {
         <Card className="border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</Card>
       ) : null}
 
-      {/* Global Statistics */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="p-6">
           <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -194,9 +197,7 @@ export const AdminUPIPanel = () => {
             Total Merchants
           </div>
           <p className="mt-3 text-3xl font-bold text-white">{globalStats?.totalMerchants || 0}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {globalStats?.activeProviders || 0} active providers
-          </p>
+          <p className="mt-1 text-xs text-slate-500">{globalStats?.activeProviders || 0} active providers</p>
         </Card>
 
         <Card className="p-6">
@@ -205,10 +206,10 @@ export const AdminUPIPanel = () => {
             Total Transactions
           </div>
           <p className="mt-3 text-3xl font-bold text-white">
-            {globalStats?.totalTransactions?.toLocaleString() || 0}
+            {globalStats?.totalTransactions?.toLocaleString("en-IN") || 0}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {globalStats?.dailyTransactions?.toLocaleString() || 0} today
+            {globalStats?.dailyTransactions?.toLocaleString("en-IN") || 0} today
           </p>
         </Card>
 
@@ -217,11 +218,9 @@ export const AdminUPIPanel = () => {
             <CheckCircle className="h-4 w-4" />
             Success Rate
           </div>
-          <p className="mt-3 text-3xl font-bold text-white">
-            {globalStats?.successRate?.toFixed(1) || 0}%
-          </p>
+          <p className="mt-3 text-3xl font-bold text-white">{globalStats?.successRate?.toFixed(1) || 0}%</p>
           <p className="mt-1 text-xs text-slate-500">
-            {globalStats?.totalVolume?.toLocaleString() || 0} total volume
+            INR {globalStats?.totalVolume?.toLocaleString("en-IN") || 0} total volume
           </p>
         </Card>
 
@@ -231,19 +230,16 @@ export const AdminUPIPanel = () => {
             Daily Volume
           </div>
           <p className="mt-3 text-3xl font-bold text-white">
-            ₹{globalStats?.dailyVolume?.toLocaleString() || 0}
+            INR {globalStats?.dailyVolume?.toLocaleString("en-IN") || 0}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
-            UPI transactions
-          </p>
+          <p className="mt-1 text-xs text-slate-500">UPI volume routed today</p>
         </Card>
       </div>
 
-      {/* Provider Health */}
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-white">
-            <Shield className="inline mr-2 h-5 w-5" />
+            <Shield className="mr-2 inline h-5 w-5" />
             Provider Health
           </h3>
           <Button className="glass-soft" onClick={refreshStats} disabled={refreshing}>
@@ -251,47 +247,29 @@ export const AdminUPIPanel = () => {
             Refresh
           </Button>
         </div>
-        
         <div className="grid gap-4 md:grid-cols-4">
           {providerStats.map((provider) => (
             <div key={provider.providerName} className="glass-soft rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-white font-medium capitalize">{provider.providerName}</p>
-                <span 
-                  className={
-                    provider.status === "healthy" 
-                      ? "bg-green-400/20 text-green-400 px-2 py-1 rounded-full text-xs" 
-                      : provider.status === "degraded"
-                      ? "bg-yellow-400/20 text-yellow-400 px-2 py-1 rounded-full text-xs"
-                      : "bg-red-400/20 text-red-400 px-2 py-1 rounded-full text-xs"
-                  }
-                >
+              <div className="mb-2 flex items-center justify-between">
+                <p className="font-medium capitalize text-white">{provider.providerName}</p>
+                <span className={`rounded-full px-2 py-1 text-xs ${providerStatusClass(provider.status)}`}>
                   {provider.status}
                 </span>
               </div>
-              <div className="space-y-1 text-sm">
-                <p className="text-slate-300">
-                  {provider.totalMerchants} merchants ({provider.activeMerchants ?? 0} active)
-                </p>
-                <p className="text-slate-300">
-                  {(provider.totalTransactions ?? 0).toLocaleString()} transactions
-                </p>
-                <p className="text-slate-300">
-                  {(provider.successRate ?? 0).toFixed(1)}% success rate
-                </p>
-                <p className="text-slate-300">
-                  {(provider.testedMerchants ?? 0).toLocaleString()} tested merchants
-                </p>
+              <div className="space-y-1 text-sm text-slate-300">
+                <p>{provider.totalMerchants} merchants ({provider.activeMerchants ?? 0} active)</p>
+                <p>{(provider.totalTransactions ?? 0).toLocaleString("en-IN")} transactions</p>
+                <p>{(provider.successRate ?? 0).toFixed(1)}% success rate</p>
+                <p>{(provider.testedMerchants ?? 0).toLocaleString("en-IN")} tested merchants</p>
               </div>
             </div>
           ))}
         </div>
       </Card>
 
-      {/* Merchant UPI Management */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          <Users className="inline mr-2 h-5 w-5" />
+        <h3 className="mb-4 text-lg font-semibold text-white">
+          <Users className="mr-2 inline h-5 w-5" />
           Merchant UPI Access
         </h3>
         <div className="mb-4 grid gap-3 md:grid-cols-3">
@@ -315,18 +293,16 @@ export const AdminUPIPanel = () => {
           </select>
           <select
             value={planFilter}
-            onChange={(event) =>
-              setPlanFilter(event.target.value as "all" | "starter" | "custom_selective" | "custom_enterprise")
-            }
+            onChange={(event) => setPlanFilter(event.target.value as "all" | "free" | "premium" | "custom")}
             className="glass-soft rounded-xl px-3 py-2 text-sm text-slate-100"
           >
             <option value="all">All plans</option>
-            <option value="starter">Starter</option>
-            <option value="custom_selective">Custom Selective</option>
-            <option value="custom_enterprise">Custom Enterprise</option>
+            <option value="free">Free</option>
+            <option value="premium">Premium</option>
+            <option value="custom">Custom</option>
           </select>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -347,81 +323,67 @@ export const AdminUPIPanel = () => {
                 <tr key={merchant.merchantId} className="border-t border-slate-700">
                   <td className="py-3 text-white">{merchant.merchantName}</td>
                   <td className="py-3">
-                    <span className={
-                      merchant.upiEnabled 
-                        ? "bg-green-400/20 text-green-400 px-2 py-1 rounded-full text-xs"
-                        : "bg-slate-700 text-slate-300 px-2 py-1 rounded-full text-xs"
-                    }>
+                    <span
+                      className={
+                        merchant.upiEnabled
+                          ? "rounded-full bg-green-400/20 px-2 py-1 text-xs text-green-400"
+                          : "rounded-full bg-slate-700 px-2 py-1 text-xs text-slate-300"
+                      }
+                    >
                       {merchant.upiEnabled ? "Enabled" : "Disabled"}
                     </span>
                   </td>
                   <td className="py-3">
                     <div className="flex items-center gap-2">
-                      <span className={
-                        merchant.plan === "custom_enterprise" 
-                          ? "bg-purple-400/20 text-purple-400 px-2 py-1 rounded-full text-xs"
-                          : merchant.plan === "custom_selective"
-                          ? "bg-blue-400/20 text-blue-400 px-2 py-1 rounded-full text-xs"
-                          : "bg-slate-700 text-slate-300 px-2 py-1 rounded-full text-xs"
-                      }>
-                        {merchant.plan || "Basic"}
+                      <span className={`rounded-full px-2 py-1 text-xs capitalize ${planBadgeClass(merchant.plan || "free")}`}>
+                        {merchant.plan || "free"}
                       </span>
                       <select
-                        value={merchant.plan || "starter"}
-                        onChange={(e) => upgradeMerchantPlan(merchant.merchantId, e.target.value)}
-                        className="text-xs bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300"
+                        value={merchant.plan || "free"}
+                        onChange={(event) =>
+                          upgradeMerchantPlan(merchant.merchantId, event.target.value as "free" | "premium" | "custom")
+                        }
+                        className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-300"
                       >
-                        <option value="starter">Starter</option>
-                        <option value="custom_selective">Custom Selective</option>
-                        <option value="custom_enterprise">Custom Enterprise</option>
+                        <option value="free">Free</option>
+                        <option value="premium">Premium</option>
+                        <option value="custom">Custom</option>
                       </select>
                     </div>
                   </td>
+                  <td className="py-3 text-slate-300">{merchant.activeProviders}</td>
+                  <td className="py-3 text-slate-300">{merchant.totalTransactions?.toLocaleString("en-IN")}</td>
+                  <td className="py-3 text-slate-300">{merchant.successRate?.toFixed(1)}%</td>
+                  <td className="py-3 text-slate-300">INR {merchant.totalVolume?.toLocaleString("en-IN")}</td>
                   <td className="py-3 text-slate-300">
-                    {merchant.activeProviders}
-                  </td>
-                  <td className="py-3 text-slate-300">
-                    {merchant.totalTransactions?.toLocaleString()}
-                  </td>
-                  <td className="py-3 text-slate-300">
-                    {merchant.successRate?.toFixed(1)}%
-                  </td>
-                  <td className="py-3 text-slate-300">
-                    ₹{merchant.totalVolume?.toLocaleString()}
-                  </td>
-                  <td className="py-3 text-slate-300">
-                    {merchant.lastActivity ? new Date(merchant.lastActivity).toLocaleDateString() : "No activity"}
+                    {merchant.lastActivity ? new Date(merchant.lastActivity).toLocaleDateString("en-IN") : "No activity"}
                   </td>
                   <td className="py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <input
                         value={providerLimitDraft[merchant.merchantId] ?? String(merchant.providerLimit ?? 0)}
                         onChange={(event) =>
-                          setProviderLimitDraft((prev) => ({ ...prev, [merchant.merchantId]: event.target.value }))
+                          setProviderLimitDraft((current) => ({ ...current, [merchant.merchantId]: event.target.value }))
                         }
                         placeholder="-1 for unlimited"
                         className="w-28 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200"
                       />
-                      {!merchant.upiEnabled && (
+                      {!merchant.upiEnabled ? (
                         <button
                           onClick={() =>
                             approveMerchantUPI(
                               merchant.merchantId,
-                              Number(
-                                providerLimitDraft[merchant.merchantId] ??
-                                  (merchant.plan === "custom_enterprise" ? -1 : 1)
-                              )
+                              Number(providerLimitDraft[merchant.merchantId] ?? (merchant.plan === "custom" ? -1 : 1))
                             )
                           }
-                          className="text-cyan-400 hover:text-cyan-300 text-sm"
+                          className="text-sm text-cyan-400 hover:text-cyan-300"
                         >
                           Approve UPI
                         </button>
-                      )}
-                      {merchant.upiEnabled && (
+                      ) : (
                         <button
                           onClick={() => revokeMerchantUPI(merchant.merchantId)}
-                          className="text-red-400 hover:text-red-300 text-sm"
+                          className="text-sm text-red-400 hover:text-red-300"
                         >
                           Revoke UPI
                         </button>

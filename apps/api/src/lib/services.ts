@@ -11,9 +11,8 @@ import {
   type SupportedAsset,
   type SupportedNetwork
 } from "@cryptopay/shared";
-import { createApiKeyPair, createPaymentLinkReference, createPaymentReference } from "./keys.js";
+import { createApiKeyPair, createPaymentLinkReference, createPaymentReference, createWebhookSecret } from "./keys.js";
 import { getAddress, isAddress, verifyMessage } from "ethers";
-import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import TronWeb from "tronweb";
@@ -39,6 +38,7 @@ import {
   listBillingInvoices
 } from "./billing.js";
 import { AppError } from "./errors.js";
+import { resolvePlatformFeeConfig } from "./fee-engine.js";
 import { quoteCryptoAmount } from "./pricing.js";
 import { recordPaymentStatus } from "./telemetry.js";
 import { deductPlatformFee, processSettlement } from "./treasury.js";
@@ -279,6 +279,14 @@ const normalizeWalletProvider = (provider?: string) => {
   return normalized;
 };
 
+const decodeSolanaPublicKey = (address: string) => {
+  const decoded = bs58.decode(address);
+  if (decoded.length !== 32) {
+    throw new Error("Invalid Solana public key length");
+  }
+  return decoded;
+};
+
 const normalizeNonCustodialAddress = (network: SupportedNetwork, address: string) => {
   const normalizedAddress = String(address ?? "").trim();
   if (!normalizedAddress) {
@@ -301,7 +309,7 @@ const normalizeNonCustodialAddress = (network: SupportedNetwork, address: string
 
   if (network === "SOL") {
     try {
-      return new PublicKey(normalizedAddress).toBase58();
+      return bs58.encode(decodeSolanaPublicKey(normalizedAddress));
     } catch {
       throw new AppError(400, "invalid_wallet_address", "Invalid Solana wallet address");
     }
@@ -359,7 +367,12 @@ export const createPaymentIntent = async (
   const checkoutSettings = await getMerchantCheckoutConfig(merchantId);
   const requestedRoute = resolveRequestedCheckoutRoute(parsed, checkoutSettings);
   const billingContext = await assertMerchantCanAcceptPayment(merchantId, requestedRoute.asset, requestedRoute.network);
-  const platformFeePercent = Number(billingContext.platformFeePercent ?? 0);
+  const feeConfig = await resolvePlatformFeeConfig({
+    merchantId,
+    planCode: billingContext.planCode,
+    chain: requestedRoute.network
+  });
+  const platformFeePercent = Number(feeConfig.feePercent ?? billingContext.platformFeePercent ?? 1);
   const platformFeeAmountFiat = Number(((parsed.amountFiat * platformFeePercent) / 100).toFixed(2));
   const paymentId = createPaymentReference();
   const quote = await quoteCryptoAmount(requestedRoute.asset, parsed.fiatCurrency, parsed.amountFiat);
@@ -505,7 +518,9 @@ export const createPaymentIntent = async (
         JSON.stringify({
           ...parsed.metadata,
           platformFeePercent,
-          platformFeeAmountFiat
+          platformFeeAmountFiat,
+          feeScope: feeConfig.scope,
+          feeNote: feeConfig.note
         }),
         walletAddress,
         JSON.stringify(walletRoutes),
@@ -596,7 +611,9 @@ export const createPaymentIntent = async (
 
   return {
     paymentId,
+    payment_id: paymentId,
     checkoutUrl: `/pay/${paymentId}`,
+    checkout_url: `/pay/${paymentId}`,
     walletAddress,
     walletRoutes,
     amountCrypto: quote.amountCrypto,
@@ -663,7 +680,7 @@ export const fetchPaymentLink = async (linkId: string) => {
 
 export const createWebhookEndpoint = async (merchantId: string, input: unknown) => {
   const parsed = createWebhookEndpointSchema.parse(input);
-  const secret = `whsec_${Math.random().toString(36).slice(2, 18)}`;
+  const secret = createWebhookSecret();
   const secretHash = await hashValue(secret);
   const secretCiphertext = encryptSecret(secret);
 
@@ -680,7 +697,7 @@ export const createWebhookEndpoint = async (merchantId: string, input: unknown) 
 };
 
 export const rotateApiSecretKey = async (merchantId: string, keyId: string) => {
-  const secretKey = `sk_live_${Math.random().toString(36).slice(2, 38)}`;
+  const { secretKey } = createApiKeyPair();
   const keyHash = await hashValue(secretKey);
   const result = await query(
     `update api_keys
@@ -714,7 +731,7 @@ export const revokeApiKey = async (merchantId: string, keyId: string) => {
 };
 
 export const rotateWebhookEndpointSecret = async (merchantId: string, endpointId: string) => {
-  const secret = `whsec_${Math.random().toString(36).slice(2, 18)}`;
+  const secret = createWebhookSecret();
   const secretHash = await hashValue(secret);
   const secretCiphertext = encryptSecret(secret);
   const result = await query<{ id: string; secret_version: number }>(
@@ -1410,10 +1427,9 @@ const verifyWalletSignature = async (
   }
 
   if (network === "SOL") {
-    const pubkey = new PublicKey(address);
     const msg = new TextEncoder().encode(message);
     const sigBytes = bs58.decode(signature);
-    return nacl.sign.detached.verify(msg, sigBytes, pubkey.toBytes());
+    return nacl.sign.detached.verify(msg, sigBytes, decodeSolanaPublicKey(address));
   }
 
   if (network === "TRC20") {

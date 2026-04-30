@@ -11,7 +11,7 @@ This project is a monorepo with:
 
 - Node.js 22 or newer
 - npm 10 or newer
-- Redis running locally on `localhost:6379`
+- Redis 7.4 or newer running locally on `localhost:6379`
 - access to the shared Supabase database or your own compatible Postgres database
 
 ## Root `.env`
@@ -29,9 +29,9 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 NEXT_PUBLIC_WS_URL=http://localhost:4001
 NEXT_PUBLIC_APP_BASE_URL=http://localhost:3003
 
-DATABASE_URL=postgresql://postgres.lqpionhiifsjehyqeydm:Numanshaikh%407862@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+DATABASE_URL=postgresql://postgres.lqpionhiifsjehyqeydm:[URL_ENCODED_SUPABASE_PASSWORD]@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
 SUPABASE_URL=https://lqpionhiifsjehyqeydm.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=service-role-key
+SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
 
 JWT_ACCESS_SECRET=dev-access-secret-change-me
 JWT_REFRESH_SECRET=dev-refresh-secret-change-me
@@ -49,7 +49,10 @@ PRICE_ORACLE_BASE_URL=https://api.coingecko.com
 
 WEBHOOK_SIGNING_SECRET=dev-webhook-secret
 ENCRYPTION_KEY=dev-encryption-key-32-bytes-lenx
+WORKER_PORT=4002
 ```
+
+Do not commit real Supabase passwords, service-role keys, JWT secrets, Binance keys, or webhook secrets. Put real local values only in `.env` or `.env.local`, both of which are ignored by git.
 
 ## Install
 
@@ -74,7 +77,7 @@ Local URLs:
 - api: `http://localhost:4000`
 - websocket: `http://localhost:4001`
 
-## Demo Credentials
+## Development Credentials
 
 - Merchant: `owner@nebula.dev` / `ChangeMe123!`
 - Admin: `admin@cryptopay.dev` / `AdminChangeMe123!`
@@ -111,11 +114,15 @@ Fix:
 
 Cause:
 
-- Redis is not running locally
+- Redis is not running locally, or an old Redis 3.x Windows service is bound to `localhost:6379`
 
 Fix:
 
-- start Redis on `localhost:6379`
+- preferred: run `docker compose up -d redis` from the repo root
+- alternative: install Redis 7.4+ locally and expose it on `localhost:6379`
+- if Docker Redis cannot bind the port, stop the old local Redis service first
+
+BullMQ runs only on Redis versions with Lua support. The worker has a safe fallback mode for old Redis, but production and realistic local tests should use Redis 7.4+.
 
 ## Vercel Frontend Deployment
 
@@ -123,15 +130,17 @@ If deploying the monorepo directly:
 
 - import the repo into Vercel
 - set `Framework Preset` to `Next.js`
-- leave `Output Directory` empty or let `vercel.json` handle it
-- if needed, set the project root to the repo root and let the repo `vercel.json` run the frontend build
+- set `Root Directory` to `apps/web`
+- set `Install Command` to `npm ci`
+- set `Build Command` to `npm run build`
+- set `Output Directory` to `.next`
 
 Required frontend env vars:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net
 NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net
-NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app
+NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-omega.vercel.app
 ```
 
 If Vercel shows:

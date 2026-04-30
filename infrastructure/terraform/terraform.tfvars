@@ -38,4 +38,4 @@ api_gateway_max_capacity = 20
 # Redis Configuration
 redis_node_type = "cache.t3.medium"
 redis_node_count = 3
-redis_auth_token = "ChangeThisRedisToken123"
+redis_auth_token = "PaycryptRedis2024!Secure"

@@ -3,6 +3,7 @@ import { requireJwt, redisRateLimit, requirePasswordSetupComplete } from "../lib
 import { createApiKeyPair } from "../lib/keys.js";
 import { hashValue } from "../lib/security.js";
 import { query } from "../lib/db.js";
+import { queues } from "../lib/queue.js";
 import {
   deleteWalletForMerchant,
   createPaymentIntent,
@@ -63,7 +64,6 @@ import {
 } from "../lib/batch-payout.js";
 import {
   createAutomationRule,
-  evaluateAutomationRules,
   listAutomationRules,
   updateAutomationRule,
   deleteAutomationRule,
@@ -760,7 +760,7 @@ dashboardRouter.delete("/sso/applications/:clientId", async (req, res) => {
 
 dashboardRouter.post("/sso/authorize", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const userId = (req as any).user.id;
+  const userId = (req as any).actor.userId;
   try {
     const { clientId, redirectUri, scopes } = req.body as { clientId: string; redirectUri: string; scopes: string[] };
     const code = await generateAuthorizationCode({ clientId, merchantId, userId, redirectUri, scopes });
@@ -817,7 +817,7 @@ dashboardRouter.post("/sso/token", async (req, res) => {
 
 dashboardRouter.post("/sso/session", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const userId = (req as any).user.id;
+  const userId = (req as any).actor.userId;
   try {
     const { clientId } = req.body as { clientId?: string };
     const ipAddress = req.ip;
@@ -880,7 +880,7 @@ dashboardRouter.post("/batch-payouts/:batchId/process", async (req, res) => {
   try {
     const { batchId } = req.params;
     const batchIdStr = Array.isArray(batchId) ? batchId[0] : batchId;
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     const result = await processBatchPayout(batchIdStr, actorId);
     res.json({ data: result });
   } catch (error) {
@@ -892,7 +892,7 @@ dashboardRouter.post("/batch-payouts/:batchId/cancel", async (req, res) => {
   try {
     const { batchId } = req.params;
     const batchIdStr = Array.isArray(batchId) ? batchId[0] : batchId;
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     const result = await cancelBatchPayout(batchIdStr, actorId);
     res.json({ data: result });
   } catch (error) {
@@ -964,8 +964,18 @@ dashboardRouter.delete("/automation-rules/:ruleId", async (req, res) => {
 dashboardRouter.post("/automation-rules/evaluate", async (req, res) => {
   try {
     const { eventType, eventData } = req.body;
-    const results = await evaluateAutomationRules(eventType, eventData);
-    res.json({ data: results });
+    await queues.automations.add(
+      "execute",
+      { eventType, eventData },
+      {
+        jobId: `automation:${eventType}:${Date.now()}`,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 20_000 },
+        removeOnComplete: true,
+        removeOnFail: false
+      }
+    );
+    res.json({ data: { status: "queued", eventType } });
   } catch (error) {
     res.status(500).json({ message: "Failed to evaluate automation rules", error: (error as Error).message });
   }
@@ -986,11 +996,11 @@ dashboardRouter.delete("/api-keys/:id", async (req, res) => {
 
 dashboardRouter.post("/subscriptions/plan", async (req, res) => {
   const merchantId = (req as any).actor.merchantId;
-  const { planCode } = req.body as { planCode: "starter" | "custom_selective" | "custom_enterprise" };
-  if (planCode === "custom_enterprise") {
+  const { planCode } = req.body as { planCode: "free" | "premium" | "custom" };
+  if (planCode === "custom") {
     res.status(403).json({
-      error: "custom_enterprise_requires_admin",
-      message: "Custom Enterprise requires an admin override"
+      error: "custom_requires_admin",
+      message: "Custom pricing requires an admin override"
     });
     return;
   }

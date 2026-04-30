@@ -2,24 +2,6 @@ volumes:
   redis-data:
 
 services:
-  nginx:
-    image: nginx:1.27-alpine
-    depends_on:
-      api:
-        condition: service_healthy
-      ws:
-        condition: service_healthy
-    ports:
-      - "80:80"
-    volumes:
-      - ./infra/aws/nginx/paycrypt.conf:/etc/nginx/conf.d/default.conf:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/nginx-ready | grep -q ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -68,10 +50,10 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

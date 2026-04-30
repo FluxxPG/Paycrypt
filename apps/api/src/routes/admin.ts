@@ -37,7 +37,6 @@ import {
   getPlatformTreasurySummary,
   approveWithdrawal,
   rejectWithdrawal,
-  processWithdrawal,
   createTreasuryAdjustment,
   approveTreasuryAdjustment,
   listWithdrawalRequests,
@@ -58,7 +57,7 @@ adminRouter.post("/merchants", requireAdmin(true), async (req, res) => {
     email: string;
     slug?: string;
     ownerName?: string;
-    planCode?: "starter" | "custom_selective" | "custom_enterprise";
+    planCode?: "free" | "premium" | "custom";
   };
   const responsePayload = await createMerchantForAdmin({
     name,
@@ -122,7 +121,7 @@ adminRouter.post("/merchants/:id/non-custodial", requireAdmin(true), async (req,
 
 adminRouter.post("/merchants/:id/subscription", requireAdmin(true), async (req, res) => {
   const { planCode, monthlyPriceInr, transactionLimit, setupFeeInr, setupFeeUsdt, platformFeePercent, status } = req.body as {
-    planCode: "starter" | "custom_selective" | "custom_enterprise";
+    planCode: "free" | "premium" | "custom";
     monthlyPriceInr?: number;
     transactionLimit?: number;
     setupFeeInr?: number;
@@ -328,7 +327,8 @@ adminRouter.get("/analytics", async (_req, res) => {
     Promise.all([
       queues.confirmations.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
       queues.webhooks.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
-      queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed")
+      queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
+      queues.withdrawals.getJobCounts("waiting", "active", "delayed", "failed", "completed")
     ]),
     query<{ total: number; delivered: number; failed: number }>(
       `select
@@ -380,7 +380,8 @@ adminRouter.get("/analytics", async (_req, res) => {
       queues: {
         confirmations: queueCounts[0],
         webhooks: queueCounts[1],
-        settlements: queueCounts[2]
+        settlements: queueCounts[2],
+        withdrawals: queueCounts[3]
       },
       webhookSummary: webhookSummary.rows[0] ?? { total: 0, delivered: 0, failed: 0 },
       settlementSummary: settlementSummary.rows[0] ?? { total: 0, processed: 0, volume: 0 },
@@ -419,7 +420,8 @@ adminRouter.get("/risk", async (_req, res) => {
     Promise.all([
       queues.confirmations.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
       queues.webhooks.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
-      queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed")
+      queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
+      queues.withdrawals.getJobCounts("waiting", "active", "delayed", "failed", "completed")
     ]),
     query<{ total: number; delivered: number; failed: number }>(
       `select
@@ -435,13 +437,15 @@ adminRouter.get("/risk", async (_req, res) => {
   const queueLatency = {
     confirmations: await readQueueLatency("payment-confirmation-checker"),
     webhooks: await readQueueLatency("webhook-dispatcher"),
-    settlements: await readQueueLatency("settlement-processor")
+    settlements: await readQueueLatency("settlement-processor"),
+    withdrawals: await readQueueLatency("withdrawal-processor")
   };
 
   const alertChecks = [
     { key: "confirmations", p95: queueLatency.confirmations.p95, threshold: 60000 },
     { key: "webhooks", p95: queueLatency.webhooks.p95, threshold: 30000 },
-    { key: "settlements", p95: queueLatency.settlements.p95, threshold: 60000 }
+    { key: "settlements", p95: queueLatency.settlements.p95, threshold: 60000 },
+    { key: "withdrawals", p95: queueLatency.withdrawals.p95, threshold: 60000 }
   ];
   for (const alert of alertChecks) {
     if (alert.p95 > alert.threshold) {
@@ -458,7 +462,8 @@ adminRouter.get("/risk", async (_req, res) => {
     queues: {
       confirmations: queueCounts[0],
       webhooks: queueCounts[1],
-      settlements: queueCounts[2]
+      settlements: queueCounts[2],
+      withdrawals: queueCounts[3]
     },
     queueLatency,
     webhookSummary: webhookSummary.rows[0] ?? { total: 0, delivered: 0, failed: 0 },
@@ -489,7 +494,8 @@ adminRouter.get("/system", async (_req, res) => {
   const queueCounts = await Promise.all([
     queues.confirmations.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
     queues.webhooks.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
-    queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed")
+    queues.settlements.getJobCounts("waiting", "active", "delayed", "failed", "completed"),
+    queues.withdrawals.getJobCounts("waiting", "active", "delayed", "failed", "completed")
   ]);
 
   res.json({
@@ -500,7 +506,8 @@ adminRouter.get("/system", async (_req, res) => {
     queues: {
       confirmations: queueCounts[0],
       webhooks: queueCounts[1],
-      settlements: queueCounts[2]
+      settlements: queueCounts[2],
+      withdrawals: queueCounts[3]
     }
   });
 });
@@ -601,7 +608,7 @@ adminRouter.post("/treasury/withdrawals/:id/approve", requireAdmin(true), async 
   try {
     const { id } = req.params;
     const withdrawalId = Array.isArray(id) ? id[0] : id;
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     await approveWithdrawal(withdrawalId, actorId);
     res.json({ success: true });
   } catch (error) {
@@ -614,7 +621,7 @@ adminRouter.post("/treasury/withdrawals/:id/reject", requireAdmin(true), async (
     const { id } = req.params;
     const withdrawalId = Array.isArray(id) ? id[0] : id;
     const { rejectionReason } = req.body as { rejectionReason: string };
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     await rejectWithdrawal(withdrawalId, rejectionReason, actorId);
     res.json({ success: true });
   } catch (error) {
@@ -626,9 +633,22 @@ adminRouter.post("/treasury/withdrawals/:id/process", requireAdmin(true), async 
   try {
     const { id } = req.params;
     const withdrawalId = Array.isArray(id) ? id[0] : id;
-    const actorId = (req as any).user.id;
-    const result = await processWithdrawal(withdrawalId, actorId);
-    res.json({ data: result });
+    const actorId = (req as any).actor.userId;
+    await queues.withdrawals.add(
+      "process",
+      { withdrawalId, performedBy: actorId },
+      {
+        jobId: `withdrawal:${withdrawalId}`,
+        attempts: 5,
+        backoff: {
+          type: "exponential",
+          delay: 30_000
+        },
+        removeOnComplete: true,
+        removeOnFail: false
+      }
+    );
+    res.json({ data: { withdrawalId, status: "queued" } });
   } catch (error) {
     res.status(500).json({ message: "Failed to process withdrawal", error: (error as Error).message });
   }
@@ -645,7 +665,7 @@ adminRouter.get("/treasury/adjustments", requireAdmin(true), async (_req, res) =
 
 adminRouter.post("/treasury/adjustments", requireAdmin(true), async (req, res) => {
   try {
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     const input = {
       ...req.body,
       performedBy: actorId
@@ -661,7 +681,7 @@ adminRouter.post("/treasury/adjustments/:id/approve", requireAdmin(true), async 
   try {
     const { id } = req.params;
     const adjustmentId = Array.isArray(id) ? id[0] : id;
-    const actorId = (req as any).user.id;
+    const actorId = (req as any).actor.userId;
     const result = await approveTreasuryAdjustment(adjustmentId, actorId);
     res.json({ data: result });
   } catch (error) {

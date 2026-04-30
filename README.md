@@ -1,6 +1,6 @@
 # Paycrypt
 
-Paycrypt is a crypto-native payment gateway SaaS platform built as a TypeScript monorepo. It includes a Next.js merchant and admin frontend, an Express API, a Socket.IO realtime gateway, BullMQ workers, a Supabase PostgreSQL data model, and deployment assets for Vercel plus AWS EC2.
+Paycrypt is a crypto-native payment gateway SaaS platform built as a TypeScript monorepo. It includes a Next.js merchant and admin frontend, an Express API, a Socket.IO realtime gateway, BullMQ workers, a Supabase PostgreSQL data model, and deployment assets for Vercel plus AWS EC2/K3s Kubernetes.
 
 ## Canonical Workspace
 
@@ -12,18 +12,21 @@ This is the single source of truth for code, deployment config, Supabase migrati
 
 ## Live Deployment
 
-- Frontend: [https://paycrypt-web-live.vercel.app](https://paycrypt-web-live.vercel.app)
-- Public docs: [https://paycrypt-web-live.vercel.app/docs](https://paycrypt-web-live.vercel.app/docs)
+- Frontend: [https://paycrypt-omega.vercel.app](https://paycrypt-omega.vercel.app)
+- Public docs: [https://paycrypt-omega.vercel.app/docs](https://paycrypt-omega.vercel.app/docs)
 - API edge: [https://d1jm86cy6nqs8t.cloudfront.net](https://d1jm86cy6nqs8t.cloudfront.net)
 - API ready: [https://d1jm86cy6nqs8t.cloudfront.net/ready](https://d1jm86cy6nqs8t.cloudfront.net/ready)
 - WS ready: [http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001/ready](http://ec2-65-2-34-31.ap-south-1.compute.amazonaws.com:4001/ready)
 - AWS region: `ap-south-1`
+- Backend runtime: K3s Kubernetes on EC2 with Nginx edge, API, WS, worker, and Redis pods
+- Container registry: AWS ECR
 
 Latest verified frontend production deployment:
 
-- project: `paycrypt-web-live`
-- deployment URL: [https://paycrypt-web-live-e3jmt8nla-numans-projects-a947d1ec.vercel.app](https://paycrypt-web-live-e3jmt8nla-numans-projects-a947d1ec.vercel.app)
-- created: `2026-04-22 20:37:04 IST`
+- project: `paycrypt`
+- deployment URL: [https://paycrypt-qaiz3qe2y-numans-projects-a947d1ec.vercel.app](https://paycrypt-qaiz3qe2y-numans-projects-a947d1ec.vercel.app)
+- alias: [https://paycrypt-omega.vercel.app](https://paycrypt-omega.vercel.app)
+- verified: `2026-04-30`
 
 ## Platform Scope
 
@@ -35,6 +38,7 @@ Latest verified frontend production deployment:
 - public payment-link pages at `/links/[id]`
 - realtime payment updates through Socket.IO
 - BullMQ background processing and settlement workflows
+- Redis 7.4-backed BullMQ queue processing in production
 - Supabase PostgreSQL schema and migrations
 - Node SDK
 - Binance custodial integration hooks
@@ -57,7 +61,8 @@ paycrypt/
 |-- supabase/
 |   `-- migrations/
 |-- infra/
-|   `-- aws/
+|   |-- aws/
+|   `-- kubernetes/
 |-- scripts/
 |-- docs/
 |-- .env.example
@@ -81,12 +86,14 @@ flowchart LR
     SDK["Node SDK / Merchant Backend"] --> Edge["CloudFront HTTPS Edge"]
     Web --> Edge
 
-    Edge --> API["Express API on EC2 :4000"]
-    Edge --> WS["Socket.IO Gateway on EC2 :4001"]
+    Edge --> Nginx["K3s Nginx Edge on EC2 :4000/:4001"]
 
-    API --> Redis["Redis 7"]
+    Nginx --> API["Kubernetes API Deployment"]
+    Nginx --> WS["Kubernetes WS Deployment"]
+
+    API --> Redis["Kubernetes Redis 7"]
     WS --> Redis
-    Worker["BullMQ Workers"] --> Redis
+    Worker["Kubernetes Worker Deployment"] --> Redis
 
     API --> DB["Supabase PostgreSQL"]
     Worker --> DB
@@ -179,24 +186,33 @@ Full setup details:
 ### Frontend
 
 - platform: Vercel
-- project: `paycrypt-web-live`
-- repo deploy path: canonical repo root via `vercel.json`
+- project: `paycrypt`
+- repo deploy path: canonical monorepo with Vercel root directory set to `apps/web`
 
 Required frontend envs:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net
 NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net
-NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app
+NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-omega.vercel.app
 ```
 
-If Vercel reports `No Output Directory named "public" found`, the project has been configured like a static site. Remove the custom `Output Directory` value and keep the framework preset as `Next.js`.
+Vercel project settings that now work for this monorepo:
+
+- Root Directory: `apps/web`
+- Install Command: `npm ci`
+- Build Command: `npm run build`
+- Output Directory: `.next`
 
 ### Backend
 
 - platform: AWS EC2
-- services: `api`, `ws`, `worker`, `redis`
+- runtime: K3s Kubernetes
+- services: `edge-nginx`, `api`, `ws`, `worker`, `redis`
 - deploy path: `/opt/paycrypt`
+- images: AWS ECR `paycrypt/api-gateway`, `paycrypt/ws-service`, `paycrypt/worker-service`
+
+This is the low-cost Kubernetes production path. The manifests are structured so the same service split can move to EKS when the platform needs multi-node autoscaling, managed Redis, and higher concurrency.
 
 Detailed deployment notes:
 
@@ -210,7 +226,7 @@ Detailed deployment notes:
 - Local setup: [docs/LOCAL_SETUP.md](/C:/Users/salma/paycrypt/docs/LOCAL_SETUP.md)
 - Project structure: [docs/PROJECT_STRUCTURE.md](/C:/Users/salma/paycrypt/docs/PROJECT_STRUCTURE.md)
 
-## Demo Credentials
+## Development Credentials
 
 - Merchant: `owner@nebula.dev` / `ChangeMe123!`
 - Admin: `admin@cryptopay.dev` / `AdminChangeMe123!`

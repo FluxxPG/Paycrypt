@@ -33,4 +33,5 @@ COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/apps/ws/dist apps/ws/dist
 
 EXPOSE 4001
+USER node
 CMD ["npm", "--workspace", "apps/ws", "run", "start"]

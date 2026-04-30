@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_USER="${APP_USER:-ubuntu}"
-APP_DIR="${APP_DIR:-/opt/cryptopay/crypto-gateway-saas}"
+APP_DIR="${APP_DIR:-/opt/paycrypt}"
 
 export DEBIAN_FRONTEND=noninteractive
 

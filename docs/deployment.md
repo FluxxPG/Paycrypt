@@ -4,30 +4,33 @@
 
 - Local repo: `C:\Users\salma\paycrypt`
 - Server deploy path: `/opt/paycrypt`
-- Frontend project: `paycrypt-web-live`
+- Frontend project: `paycrypt`
+- Frontend runtime: Next.js `16.2.4`
 
 ## Frontend Deployment On Vercel
 
-Use the canonical repo root with the repo `vercel.json`.
+Use the canonical monorepo and deploy the `apps/web` frontend through the linked Vercel project.
 
 ### Required project settings
 
 - Framework Preset: `Next.js`
-- Output Directory: leave empty
-- Root Directory: repo root
+- Root Directory: `apps/web`
+- Install Command: `npm ci`
+- Build Command: `npm run build`
+- Output Directory: `.next`
 
 ### Required env vars
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://d1jm86cy6nqs8t.cloudfront.net
 NEXT_PUBLIC_WS_URL=https://d1jm86cy6nqs8t.cloudfront.net
-NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-web-live.vercel.app
+NEXT_PUBLIC_APP_BASE_URL=https://paycrypt-omega.vercel.app
 ```
 
 ### Deploy
 
 ```bash
-vercel --prod
+vercel --prod --yes
 ```
 
 ### Common failure
@@ -44,12 +47,13 @@ Provision:
 
 - Ubuntu 24.04
 - Docker
-- Docker Compose
+- K3s
 - Git
+- SSM access
 
 ### Runtime services
 
-- `nginx`
+- `edge-nginx`
 - `api`
 - `ws`
 - `worker`
@@ -81,16 +85,28 @@ WORKER_NAME=
 1. Clone the repo to `/opt/paycrypt`.
 2. Copy the production env file into place.
 3. Run migrations against Supabase.
-4. Build and start the containers:
+4. Build and push images to ECR when changing backend code:
 
 ```bash
-docker compose build api ws worker
-docker compose up -d redis api ws worker nginx
+bash infra/kubernetes/ecr-push.sh
 ```
 
-5. Route CloudFront/API traffic to the Nginx origin (port 80), which proxies:
-   - `/socket.io/*` -> `ws:4001`
-   - all other routes -> `api:4000`
+5. Deploy or refresh the K3s runtime:
+
+```bash
+bash infra/kubernetes/k3s-deploy.sh
+```
+
+6. Cut CloudFront-facing ports over to the Kubernetes Nginx edge:
+
+```bash
+bash infra/kubernetes/k3s-cutover.sh
+```
+
+CloudFront uses the same EC2 origin ports:
+
+- API traffic -> `:4000`
+- Socket.IO / websocket traffic -> `:4001`
 
 ## Supabase
 
@@ -100,6 +116,11 @@ docker compose up -d redis api ws worker nginx
 
 ## Production Notes
 
-- Nginx is the public HTTP ingress for API + websocket traffic.
-- Redis 6/7 with Lua support is required for BullMQ.
+- The current live backend runs on K3s Kubernetes inside EC2.
+- Nginx runs inside Kubernetes and binds the EC2 origin ports used by CloudFront.
+- Docker Compose is now local/fallback infrastructure, not the live backend runtime.
+- CloudFront is the public edge in front of the EC2/K3s deployment.
+- Redis 7.4+ with Lua support is required for BullMQ. The live K3s deployment currently runs `redis:7.4-alpine`.
 - Binance custodial features require real production API credentials.
+- This is the lowest-cost Kubernetes path. For true multi-AZ high concurrency, promote the same manifests to EKS and replace in-cluster Redis with managed ElastiCache.
+- For tighter origin security, request a security-group quota increase and restrict ports `4000` and `4001` to AWS managed prefix list `com.amazonaws.global.cloudfront.origin-facing`.

@@ -204,7 +204,7 @@ upiAdminRouter.get("/merchants", async (req, res) => {
       successRate: parseFloat(row.success_rate) || 0,
       totalVolume: parseFloat(row.total_volume) || 0,
       lastActivity: row.last_activity || new Date().toISOString(),
-      plan: row.plan_code || 'starter',
+      plan: row.plan_code || 'free',
       providerLimit: row.upi_provider_limit || 0
     }));
 
@@ -256,8 +256,8 @@ upiAdminRouter.post("/merchants/:merchantId/upgrade-plan", async (req, res) => {
     `, [plan, merchantId]);
 
     // Update UPI features based on plan
-    const upiEnabled = plan === 'custom_selective' || plan === 'custom_enterprise';
-    const providerLimit = plan === 'custom_enterprise' ? -1 : (plan === 'custom_selective' ? 1 : 0);
+    const upiEnabled = plan === 'custom';
+    const providerLimit = plan === 'custom' ? -1 : 0;
     
     await queryLib(`
       UPDATE subscriptions 

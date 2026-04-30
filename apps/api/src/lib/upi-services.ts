@@ -34,7 +34,7 @@ export class UPIPaymentService {
     return {
       upiEnabled: Boolean(row?.upi_enabled),
       providerLimit: Number(row?.upi_provider_limit ?? 0),
-      planCode: row?.plan_code ?? "starter"
+      planCode: row?.plan_code ?? "free"
     };
   }
 
@@ -56,12 +56,13 @@ export class UPIPaymentService {
       throw new AppError(400, "no_upi_providers", "No UPI providers configured for this merchant");
     }
 
-    // Select provider based on routing strategy
-    const selectedProvider = await this.selectProvider(
+    // Select provider candidates based on routing strategy. Auto mode keeps a failover list.
+    const providerCandidates = this.selectProviderCandidates(
       providers,
       paymentData.provider === "auto" ? undefined : paymentData.provider,
       merchantSettings
     );
+    const selectedProvider = providerCandidates[0] ?? null;
 
     if (!selectedProvider && !merchantSettings.fallbackToManual) {
       throw new AppError(400, "provider_unavailable", "No suitable UPI provider available");
@@ -100,7 +101,7 @@ export class UPIPaymentService {
       return result.rows[0];
     });
 
-    if (!selectedProvider) {
+    const buildManualFallbackResponse = async () => {
       const merchantResult = await query<{
         upi_manual_mode_enabled: boolean;
         upi_manual_vpa: string | null;
@@ -123,90 +124,117 @@ export class UPIPaymentService {
       );
       return {
         paymentId,
+        payment_id: paymentId,
         status: "pending",
         method: "upi",
         provider: "manual",
         checkoutUrl: `/pay/${paymentId}`,
+        checkout_url: `/pay/${paymentId}`,
         intentUrl: manualIntent,
+        intent_url: manualIntent,
         qrCode: merchant.upi_manual_qr_url ?? manualIntent,
+        qr_code: merchant.upi_manual_qr_url ?? manualIntent,
+        amount: paymentData.amountFiat,
+        currency: paymentData.fiatCurrency,
+        expiresAt: payment.expires_at
+      };
+    };
+
+    if (!selectedProvider) {
+      return buildManualFallbackResponse();
+    }
+
+    const providerErrors: Array<{ provider: string; error: string }> = [];
+    for (const providerConfig of providerCandidates) {
+      const provider = createUPIProvider(
+        providerConfig.providerName,
+        providerConfig.apiKey,
+        providerConfig.secretKey,
+        providerConfig.environment
+      );
+
+      const providerRequest = {
+        paymentId,
+        merchantId,
+        amount: paymentData.amountFiat,
+        customerEmail: paymentData.customerEmail,
+        customerPhone: paymentData.customerPhone,
+        customerName: paymentData.customerName,
+        successUrl: paymentData.successUrl,
+        webhookUrl: `${process.env.API_BASE_URL}/webhooks/upi/${providerConfig.providerName}`
+      };
+
+      const result = await provider.createPayment(providerRequest);
+      if (!result.success) {
+        providerErrors.push({
+          provider: providerConfig.providerName,
+          error: result.error || "Provider did not accept the payment request"
+        });
+        continue;
+      }
+
+      await query(`
+        UPDATE payments 
+        SET 
+          upi_provider = $1,
+          upi_transaction_id = $2,
+          upi_intent_url = $3,
+          upi_qr_code = $4,
+          upi_status = 'pending',
+          provider_response = $5,
+          status = 'pending',
+          updated_at = NOW()
+        WHERE id = $6
+      `, [
+        providerConfig.providerName,
+        result.paymentId,
+        result.intentUrl ?? result.checkoutUrl,
+        result.qrCode ?? result.intentUrl ?? result.checkoutUrl,
+        JSON.stringify({ ...result, routedProvider: providerConfig.providerName, providerErrors }),
+        paymentId
+      ]);
+
+      // Emit real-time event
+      await emitPaymentEvent({
+        type: "payment.created",
+        paymentId,
+        merchantId,
+        status: "pending"
+      });
+
+      return {
+        paymentId,
+        payment_id: paymentId,
+        status: "pending",
+        method: "upi",
+        provider: providerConfig.providerName,
+        checkoutUrl: `/pay/${paymentId}`,
+        checkout_url: `/pay/${paymentId}`,
+        providerCheckoutUrl: result.checkoutUrl,
+        intentUrl: result.intentUrl ?? result.checkoutUrl,
+        intent_url: result.intentUrl ?? result.checkoutUrl,
+        qrCode: result.qrCode ?? result.intentUrl ?? result.checkoutUrl,
+        qr_code: result.qrCode ?? result.intentUrl ?? result.checkoutUrl,
         amount: paymentData.amountFiat,
         currency: paymentData.fiatCurrency,
         expiresAt: payment.expires_at
       };
     }
 
-    // Initialize provider and create payment
-    const provider = createUPIProvider(
-      selectedProvider.providerName,
-      selectedProvider.apiKey,
-      selectedProvider.secretKey,
-      selectedProvider.environment
-    );
-
-    const providerRequest = {
-      paymentId,
-      merchantId,
-      amount: paymentData.amountFiat,
-      customerEmail: paymentData.customerEmail,
-      customerPhone: paymentData.customerPhone,
-      customerName: paymentData.customerName,
-      successUrl: paymentData.successUrl,
-      webhookUrl: `${process.env.API_BASE_URL}/webhooks/upi/${selectedProvider.providerName}`
-    };
-
-    const result = await provider.createPayment(providerRequest);
-
-    if (!result.success) {
-      // Mark payment as failed
-      await query(`
-        UPDATE payments 
-        SET status = 'failed', updated_at = NOW() 
-        WHERE id = $1
-      `, [paymentId]);
-
-      throw new AppError(400, "payment_creation_failed", result.error || "Failed to create UPI payment");
+    if (merchantSettings.fallbackToManual) {
+      return buildManualFallbackResponse();
     }
 
-    // Update payment with provider response
     await query(`
       UPDATE payments 
-      SET 
-        upi_transaction_id = $1,
-        upi_intent_url = $2,
-        upi_qr_code = $3,
-        upi_status = 'pending',
-        provider_response = $4,
-        status = 'pending',
-        updated_at = NOW()
-      WHERE id = $5
+      SET status = 'failed', provider_response = $2, updated_at = NOW() 
+      WHERE id = $1
     `, [
-      result.paymentId,
-      result.intentUrl,
-      result.qrCode,
-      JSON.stringify(result),
-      paymentId
+      paymentId,
+      JSON.stringify({ providerErrors })
     ]);
 
-    // Emit real-time event
-    await emitPaymentEvent({
-      type: "payment.created",
-      paymentId,
-      merchantId,
-      status: "pending"
-    });
-
-    return {
-      paymentId,
-      status: "pending",
-      method: "upi",
-      provider: selectedProvider.providerName,
-      checkoutUrl: result.checkoutUrl,
-      intentUrl: result.intentUrl,
-      qrCode: result.qrCode,
-      amount: paymentData.amountFiat,
-      currency: paymentData.fiatCurrency,
-      expiresAt: payment.expires_at
-    };
+    throw new AppError(400, "payment_creation_failed", providerErrors[0]?.error || "Failed to create UPI payment");
   }
 
   async verifyPayment(paymentId: string, merchantId: string): Promise<any> {
@@ -552,32 +580,31 @@ export class UPIPaymentService {
     };
   }
 
-  private async selectProvider(
+  private selectProviderCandidates(
     providers: any[],
     preferredProvider?: UPIProvider,
     settings?: MerchantUpiSettings
-  ): Promise<any> {
+  ): any[] {
     const allowedProviders = new Set(settings?.allowedProviders ?? ["phonepe", "paytm", "razorpay", "freecharge"]);
+    const testedProviders = providers
+      .filter((p) => p.isTested && allowedProviders.has(p.providerName))
+      .sort((a, b) => {
+        const aPriority = settings?.providerPriority?.[a.providerName] ?? a.priority;
+        const bPriority = settings?.providerPriority?.[b.providerName] ?? b.priority;
+        return aPriority - bPriority;
+      });
 
     if (preferredProvider && allowedProviders.has(preferredProvider)) {
       const preferred = providers.find(p => p.providerName === preferredProvider);
       if (preferred && preferred.isTested) {
-        return preferred;
+        return [
+          preferred,
+          ...testedProviders.filter((provider) => provider.providerName !== preferred.providerName)
+        ];
       }
     }
 
-    // Filter to only tested providers
-    const testedProviders = providers.filter((p) => p.isTested && allowedProviders.has(p.providerName));
-    
-    if (testedProviders.length === 0) {
-      return null;
-    }
-
-    return testedProviders.sort((a, b) => {
-      const aPriority = settings?.providerPriority?.[a.providerName] ?? a.priority;
-      const bPriority = settings?.providerPriority?.[b.providerName] ?? b.priority;
-      return aPriority - bPriority;
-    })[0];
+    return testedProviders;
   }
 
   private async sendMerchantWebhook(merchantId: string, data: any): Promise<void> {

@@ -15,8 +15,74 @@ terraform {
     key            = "infrastructure/terraform.tfstate"
     region         = "ap-south-1"
     encrypt        = true
-    dynamodb_table = "paycrypt-terraform-locks"
-    profile        = "default"
+    use_lockfile   = true
+  }
+}
+
+resource "aws_appautoscaling_policy" "api_gateway_memory" {
+  name               = "${var.project_name}-api-gateway-memory-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.api_gateway.resource_id
+  scalable_dimension = aws_appautoscaling_target.api_gateway.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.api_gateway.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageMemoryUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_target" "ws" {
+  max_capacity       = var.ws_max_capacity
+  min_capacity       = var.ws_min_capacity
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.ws.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "ws_cpu" {
+  name               = "${var.project_name}-ws-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ws.resource_id
+  scalable_dimension = aws_appautoscaling_target.ws.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ws.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_target" "worker" {
+  max_capacity       = var.worker_max_capacity
+  min_capacity       = var.worker_min_capacity
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.worker.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "worker_cpu" {
+  name               = "${var.project_name}-worker-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.worker.resource_id
+  scalable_dimension = aws_appautoscaling_target.worker.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.worker.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
   }
 }
 
@@ -288,6 +354,27 @@ resource "aws_lb_target_group" "payment_service" {
   }
 }
 
+resource "aws_lb_target_group" "ws" {
+  name        = "${var.project_name}-ws-tg"
+  port        = 4001
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
+  target_type = "ip"
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = "/health"
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "${var.project_name}-ws-tg"
+  }
+}
+
 # ALB Listener
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.api.arn
@@ -317,6 +404,22 @@ resource "aws_lb_listener_rule" "payment_service" {
   }
 }
 
+resource "aws_lb_listener_rule" "ws" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 110
+
+  condition {
+    path_pattern {
+      values = ["/socket.io*"]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ws.arn
+  }
+}
+
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
@@ -328,6 +431,70 @@ resource "aws_ecs_cluster" "main" {
 
   tags = {
     Name = "${var.project_name}-cluster"
+  }
+}
+
+# Service discovery (Cloud Map)
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  name        = "${var.project_name}.local"
+  description = "Service discovery namespace for ${var.project_name}"
+  vpc         = module.vpc.vpc_id
+}
+
+resource "aws_service_discovery_service" "api_gateway" {
+  name = "api"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+resource "aws_service_discovery_service" "ws" {
+  name = "ws"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+resource "aws_service_discovery_service" "worker" {
+  name = "worker"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
   }
 }
 
@@ -356,14 +523,6 @@ resource "aws_ecs_task_definition" "api_gateway" {
         {
           name  = "NODE_ENV"
           value = var.environment
-        },
-        {
-          name  = "REDIS_HOST"
-          value = aws_elasticache_replication_group.redis.primary_endpoint_address
-        },
-        {
-          name  = "REDIS_PORT"
-          value = "6379"
         }
       ]
       secrets = [
@@ -373,7 +532,11 @@ resource "aws_ecs_task_definition" "api_gateway" {
         },
         {
           name      = "DATABASE_URL"
-          valueFrom = aws_secretsmanager_secret.database_url.arn
+          valueFrom = aws_secretsmanager_secret.supabase_url.arn
+        },
+        {
+          name      = "REDIS_URL"
+          valueFrom = aws_secretsmanager_secret.redis_url.arn
         }
       ]
       logConfiguration = {
@@ -399,6 +562,182 @@ resource "aws_ecs_task_definition" "api_gateway" {
   }
 }
 
+resource "aws_ecs_service" "ws" {
+  name            = "${var.project_name}-ws"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.ws.arn
+  desired_count   = var.ws_desired_count
+  launch_type     = "FARGATE"
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.ws.arn
+  }
+
+  network_configuration {
+    subnets          = module.vpc.private_subnets
+    security_groups  = [aws_security_group.api.id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ws.arn
+    container_name   = "ws"
+    container_port   = 4001
+  }
+
+  enable_execute_command = false
+
+  tags = {
+    Name = "${var.project_name}-ws"
+  }
+}
+
+resource "aws_ecs_service" "worker" {
+  name            = "${var.project_name}-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.worker.arn
+  desired_count   = var.worker_desired_count
+  launch_type     = "FARGATE"
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.worker.arn
+  }
+
+  network_configuration {
+    subnets          = module.vpc.private_subnets
+    security_groups  = [aws_security_group.api.id]
+    assign_public_ip = false
+  }
+
+  enable_execute_command = false
+
+  tags = {
+    Name = "${var.project_name}-worker"
+  }
+}
+
+resource "aws_ecs_task_definition" "ws" {
+  family                   = "${var.project_name}-ws"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.ws_cpu
+  memory                   = var.ws_memory
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "ws"
+      image     = "${var.ecr_repository_url}/ws-service:${var.image_tag}"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 4001
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        {
+          name  = "NODE_ENV"
+          value = var.environment
+        }
+      ]
+      secrets = [
+        {
+          name      = "DATABASE_URL"
+          valueFrom = aws_secretsmanager_secret.supabase_url.arn
+        },
+        {
+          name      = "REDIS_URL"
+          valueFrom = aws_secretsmanager_secret.redis_url.arn
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ws"
+        }
+      }
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:4001/health || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+    }
+  ])
+
+  tags = {
+    Name = "${var.project_name}-ws"
+  }
+}
+
+resource "aws_ecs_task_definition" "worker" {
+  family                   = "${var.project_name}-worker"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "worker"
+      image     = "${var.ecr_repository_url}/worker-service:${var.image_tag}"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 4002
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        {
+          name  = "NODE_ENV"
+          value = var.environment
+        },
+        {
+          name  = "WORKER_PORT"
+          value = "4002"
+        }
+      ]
+      secrets = [
+        {
+          name      = "DATABASE_URL"
+          valueFrom = aws_secretsmanager_secret.supabase_url.arn
+        },
+        {
+          name      = "REDIS_URL"
+          valueFrom = aws_secretsmanager_secret.redis_url.arn
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "worker"
+        }
+      }
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:4002/health || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+    }
+  ])
+
+  tags = {
+    Name = "${var.project_name}-worker"
+  }
+}
+
 # ECS Services
 resource "aws_ecs_service" "api_gateway" {
   name            = "${var.project_name}-api-gateway"
@@ -406,6 +745,10 @@ resource "aws_ecs_service" "api_gateway" {
   task_definition = aws_ecs_task_definition.api_gateway.arn
   desired_count   = var.api_gateway_desired_count
   launch_type     = "FARGATE"
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.api_gateway.arn
+  }
 
   network_configuration {
     subnets          = module.vpc.private_subnets
@@ -416,7 +759,7 @@ resource "aws_ecs_service" "api_gateway" {
   load_balancer {
     target_group_arn = aws_lb_target_group.api_gateway.arn
     container_name   = "api-gateway"
-    container_port   = 3000
+    container_port   = 4000
   }
 
   enable_execute_command = false
@@ -541,14 +884,28 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
   }
 }
 
-resource "aws_secretsmanager_secret" "database_url" {
-  name = "${var.project_name}/database-url"
-  description = "Database connection URL"
+resource "aws_secretsmanager_secret" "supabase_url" {
+  name = "${var.project_name}/supabase-url"
+  description = "Supabase database connection URL"
   kms_key_id = aws_kms_key.secrets.arn
 
   tags = {
-    Name = "${var.project_name}-database-url"
+    Name = "${var.project_name}-supabase-url"
   }
+}
+
+resource "aws_secretsmanager_secret" "redis_url" {
+  name        = "${var.project_name}/redis-url"
+  description = "Redis connection URL"
+
+  tags = {
+    Name = "${var.project_name}-redis-url"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "redis_url" {
+  secret_id = aws_secretsmanager_secret.redis_url.id
+  secret_string = "rediss://:${var.redis_auth_token}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
 }
 
 # CloudWatch Log Groups
@@ -640,7 +997,8 @@ resource "aws_iam_role_policy" "ecs_task_role" {
         ]
         Resource = [
           aws_secretsmanager_secret.jwt_secret.arn,
-          aws_secretsmanager_secret.database_url.arn,
+          aws_secretsmanager_secret.supabase_url.arn,
+          aws_secretsmanager_secret.redis_url.arn,
           aws_kms_key.secrets.arn
         ]
       },

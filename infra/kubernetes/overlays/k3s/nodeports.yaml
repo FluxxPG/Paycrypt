@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-nodeport
+  namespace: paycrypt
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: paycrypt
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+      nodePort: 31040
+  selector:
+    app.kubernetes.io/name: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ws-nodeport
+  namespace: paycrypt
+  labels:
+    app.kubernetes.io/name: ws
+    app.kubernetes.io/part-of: paycrypt
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 4001
+      targetPort: http
+      nodePort: 31041
+  selector:
+    app.kubernetes.io/name: ws

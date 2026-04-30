@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 // Enhanced Crypto SDK with production-ready features
 export class CryptoPayClient {
   constructor(options) {
@@ -97,16 +99,14 @@ export class CryptoPayClient {
 
   // Enhanced webhook handling
   async verifyWebhookSignature(payload, signature, secret) {
-    const crypto = require('node:crypto');
     const expectedSignature = crypto
       .createHmac("sha256", secret)
       .update(JSON.stringify(payload))
       .digest("hex");
 
-    return crypto.timingSafeEqual(
-      Buffer.from(signature, "hex"),
-      Buffer.from(expectedSignature, "hex")
-    );
+    const received = Buffer.from(signature, "hex");
+    const expected = Buffer.from(expectedSignature, "hex");
+    return received.length === expected.length && crypto.timingSafeEqual(received, expected);
   }
 
   // Utility methods
@@ -117,7 +117,7 @@ export class CryptoPayClient {
   // Generate secure payment reference
   generatePaymentReference() {
     const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substr(2, 9);
+    const random = crypto.randomBytes(9).toString("base64url");
     return `crypto_${timestamp}_${random}`;
   }
 

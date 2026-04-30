@@ -5,6 +5,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
+COPY apps/ws/package.json apps/ws/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
@@ -24,6 +25,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
+COPY apps/ws/package.json apps/ws/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY --from=deps /app/node_modules ./node_modules
@@ -31,4 +33,5 @@ COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/apps/api/dist apps/api/dist
 
 EXPOSE 4000
+USER node
 CMD ["npm", "--workspace", "apps/api", "run", "start"]

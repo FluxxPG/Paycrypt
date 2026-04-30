@@ -12,6 +12,7 @@ import {
   CreditCard,
   FileText,
   KeyRound,
+  Landmark,
   Settings2,
   ShieldCheck,
   Smartphone,
@@ -35,6 +36,7 @@ const navSections = [
     items: [
       { href: "/dashboard", label: "Overview", icon: Activity },
       { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
+      { href: "/dashboard/treasury", label: "Treasury", icon: Landmark },
       { href: "/dashboard/wallets", label: "Wallets", icon: Wallet },
       { href: "/dashboard/upi", label: "UPI", icon: Smartphone, requiresUpi: true },
       { href: "/dashboard/integrations", label: "Integrations", icon: Link2 }

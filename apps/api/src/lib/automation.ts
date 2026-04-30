@@ -1,5 +1,6 @@
 import { query, withTransaction } from "./db.js";
 import { AppError } from "./errors.js";
+import { createTreasuryAdjustment, createWithdrawalRequest } from "./treasury.js";
 import { nanoid } from "nanoid";
 
 export type TriggerEventType =
@@ -22,39 +23,39 @@ export type ActionType =
   | "alert_admin";
 
 export interface AutomationRule {
-  id: string;
+  id: string; // UUID as string
   name: string;
   description: string | null;
-  trigger_event: TriggerEventType;
+  trigger_event: string;
   conditions: Record<string, unknown>;
-  actions: Array<{
-    type: ActionType;
-    params: Record<string, unknown>;
-  }>;
+  actions: AutomationAction[];
   is_active: boolean;
   merchant_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
+export interface AutomationAction {
+  type: ActionType;
+  params: Record<string, unknown>;
+}
+
 export const createAutomationRule = async (input: {
   name: string;
   description?: string;
-  triggerEvent: TriggerEventType;
+  triggerEvent: string;
   conditions: Record<string, unknown>;
-  actions: Array<{ type: ActionType; params: Record<string, unknown> }>;
+  actions: AutomationAction[];
   merchantId?: string;
 }) => {
-  const ruleId = `rule_${nanoid(16)}`;
-
   const result = await query<{ id: string }>(
-    `insert into automation_rules (id, name, description, trigger_event, conditions, actions, merchant_id, is_active)
-     values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, true)
+    `insert into automation_rules (name, description, trigger_event, conditions, actions, merchant_id)
+     values ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
      returning id`,
-    [ruleId, input.name, input.description ?? null, input.triggerEvent, JSON.stringify(input.conditions), JSON.stringify(input.actions), input.merchantId ?? null]
+    [input.name, input.description ?? null, input.triggerEvent, JSON.stringify(input.conditions), JSON.stringify(input.actions), input.merchantId ?? null]
   );
-
-  return { id: result.rows[0].id };
+  
+  return { ruleId: result.rows[0].id };
 };
 
 export const evaluateAutomationRules = async (eventType: TriggerEventType, eventData: Record<string, unknown>) => {
@@ -143,7 +144,7 @@ const getNestedValue = (obj: Record<string, unknown>, path: string): unknown => 
   }, obj as unknown);
 };
 
-const executeActions = async (actions: Array<{ type: ActionType; params: Record<string, unknown> }>, eventData: Record<string, unknown>) => {
+const executeActions = async (actions: AutomationAction[], eventData: Record<string, unknown>) => {
   for (const action of actions) {
     switch (action.type) {
       case "send_webhook":
@@ -189,21 +190,90 @@ const executeWebhookAction = async (params: Record<string, unknown>, eventData: 
 };
 
 const executeEmailAction = async (params: Record<string, unknown>, eventData: Record<string, unknown>) => {
-  // Placeholder for email sending logic
-  // This would integrate with an email service like SendGrid, AWS SES, etc.
-  console.log("Email action executed:", { params, eventData });
+  const recipients = Array.isArray(params.recipients)
+    ? params.recipients.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const subject = typeof params.subject === "string" ? params.subject.trim() : "Automation notification";
+  const message = typeof params.message === "string" ? params.message.trim() : subject;
+
+  if (!recipients.length) {
+    throw new Error("At least one email recipient is required");
+  }
+
+  await query(
+    `insert into system_alerts (severity, source, message, metadata)
+     values ('info', 'automation-email', $1, $2::jsonb)`,
+    [
+      message,
+      JSON.stringify({
+        subject,
+        recipients,
+        notificationType: "email",
+        eventData
+      })
+    ]
+  );
 };
 
 const executeWithdrawalAction = async (params: Record<string, unknown>, eventData: Record<string, unknown>) => {
-  // Placeholder for withdrawal action
-  // This would integrate with the treasury system
-  console.log("Withdrawal action executed:", { params, eventData });
+  const ownerType = params.ownerType === "platform" ? "platform" : "merchant";
+  const ownerId =
+    typeof params.ownerId === "string" && params.ownerId.trim()
+      ? params.ownerId.trim()
+      : typeof eventData.merchantId === "string"
+        ? eventData.merchantId
+        : null;
+  const asset = typeof params.asset === "string" ? params.asset.trim().toUpperCase() : "";
+  const network = typeof params.network === "string" ? params.network.trim().toUpperCase() : "";
+  const amountCrypto = Number(params.amountCrypto ?? 0);
+  const destinationAddress =
+    typeof params.destinationAddress === "string" ? params.destinationAddress.trim() : "";
+
+  if (!ownerId || !asset || !network || !destinationAddress || !Number.isFinite(amountCrypto) || amountCrypto <= 0) {
+    throw new Error("Automation withdrawal requires ownerId, asset, network, amountCrypto, and destinationAddress");
+  }
+
+  await createWithdrawalRequest(ownerType, ownerId, {
+    asset: asset as any,
+    network,
+    amountCrypto,
+    destinationAddress,
+    destinationWalletProvider:
+      typeof params.destinationWalletProvider === "string" ? params.destinationWalletProvider.trim() : undefined
+  });
 };
 
 const executeAdjustmentAction = async (params: Record<string, unknown>, eventData: Record<string, unknown>) => {
-  // Placeholder for adjustment action
-  // This would integrate with the treasury system
-  console.log("Adjustment action executed:", { params, eventData });
+  const ownerType = params.ownerType === "platform" ? "platform" : "merchant";
+  const ownerId =
+    typeof params.ownerId === "string" && params.ownerId.trim()
+      ? params.ownerId.trim()
+      : typeof eventData.merchantId === "string"
+        ? eventData.merchantId
+        : null;
+  const asset = typeof params.asset === "string" ? params.asset.trim().toUpperCase() : "";
+  const network = typeof params.network === "string" ? params.network.trim().toUpperCase() : "";
+  const adjustmentType = params.adjustmentType === "debit" ? "debit" : "credit";
+  const amountCrypto = Number(params.amountCrypto ?? 0);
+  const amountFiatEquivalent = Number(params.amountFiatEquivalent ?? 0);
+  const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason.trim() : "Automation rule adjustment";
+  const performedBy = typeof params.performedBy === "string" && params.performedBy.trim() ? params.performedBy.trim() : "automation";
+
+  if (!ownerId || !asset || !network || !Number.isFinite(amountCrypto) || amountCrypto <= 0) {
+    throw new Error("Automation adjustment requires ownerId, asset, network, and amountCrypto");
+  }
+
+  await createTreasuryAdjustment({
+    ownerType,
+    ownerId,
+    asset,
+    network,
+    adjustmentType,
+    amountCrypto,
+    amountFiatEquivalent: Number.isFinite(amountFiatEquivalent) && amountFiatEquivalent > 0 ? amountFiatEquivalent : 0,
+    reason,
+    performedBy
+  });
 };
 
 const executeBlockMerchantAction = async (params: Record<string, unknown>, eventData: Record<string, unknown>) => {
@@ -249,7 +319,7 @@ export const updateAutomationRule = async (ruleId: string, input: {
   name?: string;
   description?: string;
   conditions?: Record<string, unknown>;
-  actions?: Array<{ type: ActionType; params: Record<string, unknown> }>;
+  actions?: AutomationAction[];
   isActive?: boolean;
 }) => {
   const updates: string[] = [];

@@ -321,7 +321,7 @@ export class UPISecurityManager {
 
     // Store in Redis with 7-day expiry
     await redis.setex(
-      `upi_security_log:${Date.now()}_${Math.random().toString(36)}`,
+      `upi_security_log:${Date.now()}_${crypto.randomUUID()}`,
       604800,
       JSON.stringify(logEntry)
     );

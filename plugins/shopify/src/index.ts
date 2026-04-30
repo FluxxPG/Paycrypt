@@ -1,10 +1,14 @@
+import crypto from "node:crypto";
 import { CryptoPayClient, CreatePaymentInput } from "@cryptopay/sdk";
 
 export interface ShopifyPluginConfig {
   apiKey: string;
   apiSecret: string;
   shopDomain: string;
+  shopifyAdminAccessToken: string;
   paycryptBaseUrl?: string;
+  shopifyApiVersion?: string;
+  fetcher?: typeof fetch;
 }
 
 export interface ShopifyOrder {
@@ -16,36 +20,57 @@ export interface ShopifyOrder {
   financial_status: string;
 }
 
+const statusMap: Record<string, string> = {
+  created: "pending",
+  pending: "pending",
+  confirmed: "paid",
+  failed: "voided",
+  expired: "voided"
+};
+
 export class PaycryptShopifyPlugin {
   private client: CryptoPayClient;
   private shopDomain: string;
+  private apiVersion: string;
+  private accessToken: string;
+  private paycryptBaseUrl: string;
+  private fetcher: typeof fetch;
 
   constructor(config: ShopifyPluginConfig) {
+    this.paycryptBaseUrl = config.paycryptBaseUrl || "https://api.paycrypt.com";
     this.client = new CryptoPayClient({
       secretKey: config.apiSecret,
-      baseUrl: config.paycryptBaseUrl || "https://api.paycrypt.com"
+      baseUrl: this.paycryptBaseUrl
     });
-    this.shopDomain = config.shopDomain;
+    this.shopDomain = config.shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    this.apiVersion = config.shopifyApiVersion || "2026-01";
+    this.accessToken = config.shopifyAdminAccessToken;
+    this.fetcher = config.fetcher ?? fetch;
   }
 
-  /**
-   * Create a payment intent from a Shopify order
-   */
-  async createPaymentFromOrder(order: ShopifyOrder, options: {
-    successUrl?: string;
-    cancelUrl?: string;
-    description?: string;
-  } = {}) {
-    const paymentInput: CreatePaymentInput = {
-      amountFiat: parseFloat(order.total_price),
+  async createPaymentFromOrder(
+    order: ShopifyOrder,
+    options: {
+      successUrl?: string;
+      cancelUrl?: string;
+      description?: string;
+      method?: "crypto" | "upi";
+      provider?: "auto" | "phonepe" | "paytm" | "razorpay" | "freecharge";
+    } = {}
+  ) {
+    const paymentInput: CreatePaymentInput & Record<string, unknown> = {
+      amountFiat: Number.parseFloat(order.total_price),
       fiatCurrency: order.currency,
       settlementCurrency: "USDT",
       network: "TRC20",
-      description: options.description || `Order ${order.name}`,
+      method: options.method ?? "crypto",
+      provider: options.provider ?? "auto",
+      description: options.description || `Shopify order ${order.name}`,
       customerEmail: order.customer_email,
       successUrl: options.successUrl || `https://${this.shopDomain}/account/orders/${order.id}`,
       cancelUrl: options.cancelUrl || `https://${this.shopDomain}/cart`,
       metadata: {
+        platform: "shopify",
         shopifyOrderId: order.id,
         shopifyOrderName: order.name,
         shopDomain: this.shopDomain
@@ -55,103 +80,129 @@ export class PaycryptShopifyPlugin {
     return this.client.payment.create(paymentInput);
   }
 
-  /**
-   * Handle Shopify webhook for order creation
-   */
   async handleOrderCreated(order: ShopifyOrder) {
-    // Auto-create payment if order is pending
-    if (order.financial_status === "pending") {
-      const payment = await this.createPaymentFromOrder(order);
-      return {
-        success: true,
-        paymentId: payment.paymentId,
-        checkoutUrl: payment.checkoutUrl
-      };
+    if (order.financial_status !== "pending") {
+      return { success: false, message: "Order is not pending payment" };
     }
 
-    return { success: false, message: "Order not in pending state" };
+    const payment = (await this.createPaymentFromOrder(order)) as any;
+    await this.writeOrderMetafield(order.id, "paycrypt_payment_id", payment.paymentId ?? payment.id);
+    await this.writeOrderMetafield(order.id, "paycrypt_checkout_url", payment.checkoutUrl ?? payment.checkout_url);
+
+    return {
+      success: true,
+      paymentId: payment.paymentId ?? payment.id,
+      checkoutUrl: payment.checkoutUrl ?? payment.checkout_url
+    };
   }
 
-  /**
-   * Sync payment status back to Shopify
-   */
   async syncPaymentStatus(paymentId: string, shopifyOrderId: number) {
-    const payment = await this.client.payment.fetch(paymentId);
+    const payment = (await this.client.payment.fetch(paymentId)) as any;
+    const shopifyFinancialStatus = statusMap[payment.status] || "pending";
 
-    // Map Paycrypt status to Shopify financial status
-    const statusMap: Record<string, string> = {
-      created: "pending",
-      pending: "pending",
-      confirmed: "paid",
-      failed: "voided",
-      expired: "voided"
-    };
+    if (shopifyFinancialStatus === "paid") {
+      await this.createTransaction(shopifyOrderId, {
+        kind: "sale",
+        status: "success",
+        amount: String(payment.amountFiat ?? payment.amount_fiat),
+        currency: payment.fiatCurrency ?? payment.fiat_currency,
+        gateway: "Paycrypt",
+        authorization: payment.txHash ?? payment.tx_hash ?? payment.id
+      });
+    }
 
-    const shopifyStatus = statusMap[payment.status] || "pending";
+    await this.writeOrderMetafield(shopifyOrderId, "paycrypt_status", payment.status);
+    await this.writeOrderMetafield(shopifyOrderId, "paycrypt_payment_id", paymentId);
 
-    // This would typically call Shopify Admin API
-    // For now, return the mapped status
     return {
       paymentId,
       shopifyOrderId,
       paycryptStatus: payment.status,
-      shopifyFinancialStatus: shopifyStatus
+      shopifyFinancialStatus,
+      synced: true
     };
   }
 
-  /**
-   * Get payment link for a Shopify order
-   */
   getPaymentLink(paymentId: string): string {
-    return `https://paycrypt.com/pay/${paymentId}`;
+    return `${this.paycryptBaseUrl.replace(/\/$/, "")}/pay/${paymentId}`;
   }
 
-  /**
-   * Validate Shopify webhook signature
-   */
   static validateWebhookSignature(payload: string, signature: string, webhookSecret: string): boolean {
-    const crypto = require("crypto");
-    const hmac = crypto.createHmac("sha256", webhookSecret);
-    hmac.update(payload);
-    const digest = hmac.digest("base64");
-    return digest === signature;
+    const digest = crypto.createHmac("sha256", webhookSecret).update(payload, "utf8").digest("base64");
+    const left = Buffer.from(digest);
+    const right = Buffer.from(signature);
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
   }
 
-  /**
-   * Process Shopify order refund via Paycrypt treasury
-   */
-  async processRefund(orderId: number, amount: number, reason: string) {
-    // This would interact with the treasury system to process refunds
-    // For now, return a placeholder response
+  async getHealthStatus() {
+    const [paycrypt, shopify] = await Promise.allSettled([
+      this.fetcher(`${this.paycryptBaseUrl.replace(/\/$/, "")}/health`),
+      this.shopifyRequest(`/shop.json`, { method: "GET" })
+    ]);
+
     return {
-      success: true,
-      orderId,
-      refundAmount: amount,
-      reason,
-      status: "processing"
+      status:
+        paycrypt.status === "fulfilled" &&
+        paycrypt.value.ok &&
+        shopify.status === "fulfilled"
+          ? "healthy"
+          : "unhealthy",
+      shopDomain: this.shopDomain,
+      paycryptReachable: paycrypt.status === "fulfilled" ? paycrypt.value.ok : false,
+      shopifyReachable: shopify.status === "fulfilled",
+      timestamp: new Date().toISOString()
     };
   }
 
-  /**
-   * Get plugin health status
-   */
-  async getHealthStatus() {
-    try {
-      // Test API connection
-      await this.client.payment.fetch("test");
-      return {
-        status: "healthy",
-        shopDomain: this.shopDomain,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      return {
-        status: "unhealthy",
-        shopDomain: this.shopDomain,
-        error: (error as Error).message,
-        timestamp: new Date().toISOString()
-      };
+  private async writeOrderMetafield(orderId: number, key: string, value: unknown) {
+    return this.shopifyRequest(`/orders/${orderId}/metafields.json`, {
+      method: "POST",
+      body: JSON.stringify({
+        metafield: {
+          namespace: "paycrypt",
+          key,
+          type: "single_line_text_field",
+          value: String(value ?? "")
+        }
+      })
+    });
+  }
+
+  private async createTransaction(
+    orderId: number,
+    transaction: {
+      kind: "sale" | "void" | "refund";
+      status: "success" | "failure";
+      amount: string;
+      currency: string;
+      gateway: string;
+      authorization: string;
     }
+  ) {
+    return this.shopifyRequest(`/orders/${orderId}/transactions.json`, {
+      method: "POST",
+      body: JSON.stringify({ transaction })
+    });
+  }
+
+  private async shopifyRequest<T = unknown>(path: string, init: RequestInit): Promise<T> {
+    const response = await this.fetcher(
+      `https://${this.shopDomain}/admin/api/${this.apiVersion}${path}`,
+      {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": this.accessToken,
+          ...(init.headers ?? {})
+        }
+      }
+    );
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`Shopify Admin API failed with ${response.status}: ${JSON.stringify(payload)}`);
+    }
+    return payload as T;
   }
 }
 

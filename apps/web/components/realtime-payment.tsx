@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getApiBaseUrl } from "../lib/runtime-config";
+import { io, type Socket } from "socket.io-client";
+import type { RealtimeEventName, RealtimePaymentEvent } from "@cryptopay/shared";
+import { getWsBaseUrl } from "../lib/runtime-config";
 import { Badge } from "./ui/badge";
 
 type Props = {
@@ -11,46 +13,49 @@ type Props = {
   paymentMethod?: "crypto" | "upi";
 };
 
+const paymentEvents: RealtimeEventName[] = [
+  "payment.created",
+  "payment.pending",
+  "payment.confirmed",
+  "payment.failed",
+  "payment.expired"
+];
+
 export const RealtimePayment = ({ paymentId, merchantId, initialStatus, paymentMethod = "crypto" }: Props) => {
   const [status, setStatus] = useState(initialStatus);
-  const [ws, setWs] = useState<WebSocket | null>(null);
 
   useEffect(() => {
-    const wsUrl = `${getApiBaseUrl().replace("http", "ws")}/ws/payments/${paymentId}`;
-    const socket = new WebSocket(wsUrl);
+    const socket: Socket = io(getWsBaseUrl(), {
+      transports: ["websocket", "polling"],
+      reconnection: true
+    });
 
-    socket.onopen = () => {
-      console.log("WebSocket connected");
-    };
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.status) {
-        setStatus(data.status);
+    const handleEvent = (event: RealtimePaymentEvent) => {
+      if (event.paymentId !== paymentId) {
+        return;
       }
-      // Handle UPI-specific updates
-      if (paymentMethod === "upi" && data.upiStatus) {
-        setStatus(data.upiStatus);
-      }
+      setStatus(event.status);
     };
 
-    socket.onerror = (error) => {
-      console.error("WebSocket error:", error);
-    };
+    socket.on("connect", () => {
+      socket.emit("merchant:join", merchantId);
+      socket.emit("payment:join", paymentId);
+    });
 
-    socket.onclose = () => {
-      console.log("WebSocket disconnected");
-    };
-
-    setWs(socket);
+    for (const eventName of paymentEvents) {
+      socket.on(eventName, handleEvent);
+    }
 
     return () => {
-      socket.close();
+      for (const eventName of paymentEvents) {
+        socket.off(eventName, handleEvent);
+      }
+      socket.disconnect();
     };
-  }, [paymentId, paymentMethod]);
+  }, [merchantId, paymentId]);
 
-  const statusColor = (s: string) => {
-    switch (s) {
+  const statusColor = (value: string) => {
+    switch (value) {
       case "confirmed":
         return "text-emerald-400";
       case "failed":
@@ -66,8 +71,8 @@ export const RealtimePayment = ({ paymentId, merchantId, initialStatus, paymentM
     }
   };
 
-  const statusLabel = (s: string) => {
-    switch (s) {
+  const statusLabel = (value: string) => {
+    switch (value) {
       case "confirmed":
         return paymentMethod === "upi" ? "UPI Confirmed" : "Confirmed";
       case "failed":
@@ -79,13 +84,9 @@ export const RealtimePayment = ({ paymentId, merchantId, initialStatus, paymentM
       case "expired":
         return "Expired";
       default:
-        return s;
+        return value;
     }
   };
 
-  return (
-    <Badge className={`capitalize ${statusColor(status)}`}>
-      {statusLabel(status)}
-    </Badge>
-  );
+  return <Badge className={`capitalize ${statusColor(status)}`}>{statusLabel(status)}</Badge>;
 };

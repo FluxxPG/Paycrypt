@@ -2,9 +2,9 @@ import { z } from "zod";
 export * from "./upi-types.js";
 
 export const planCatalog = {
-  starter: {
-    code: "starter",
-    name: "Starter",
+  free: {
+    code: "free",
+    name: "Free",
     monthlyPriceInr: 0,
     transactionLimit: 5000,
     priorityProcessing: false,
@@ -12,31 +12,43 @@ export const planCatalog = {
     platformFeePercent: 1,
     nonCustodialWalletLimit: 0,
     setupFeeInr: 0,
-    setupFeeUsdt: 0
+    setupFeeUsdt: 0,
+    upiEnabled: false,
+    upiProviderLimit: 0,
+    binanceEnabled: true,
+    trustWalletEnabled: false
   },
-  custom_selective: {
-    code: "custom_selective",
-    name: "Custom Selective",
-    monthlyPriceInr: 0,
+  premium: {
+    code: "premium",
+    name: "Premium",
+    monthlyPriceInr: 15000,
     transactionLimit: 20000,
     priorityProcessing: true,
     nonCustodialEnabled: true,
-    platformFeePercent: 2,
-    nonCustodialWalletLimit: 1,
+    platformFeePercent: 1,
+    nonCustodialWalletLimit: 3,
     setupFeeInr: 0,
-    setupFeeUsdt: 0
+    setupFeeUsdt: 0,
+    upiEnabled: false,
+    upiProviderLimit: 0,
+    binanceEnabled: true,
+    trustWalletEnabled: true
   },
-  custom_enterprise: {
-    code: "custom_enterprise",
-    name: "Custom Enterprise",
+  custom: {
+    code: "custom",
+    name: "Custom",
     monthlyPriceInr: 0,
-    transactionLimit: 0,
+    transactionLimit: -1,
     priorityProcessing: true,
     nonCustodialEnabled: true,
-    platformFeePercent: 2,
+    platformFeePercent: 1,
     nonCustodialWalletLimit: -1,
     setupFeeInr: 10000,
-    setupFeeUsdt: 10000
+    setupFeeUsdt: 10000,
+    upiEnabled: true,
+    upiProviderLimit: -1,
+    binanceEnabled: true,
+    trustWalletEnabled: true
   }
 } as const;
 
@@ -152,7 +164,7 @@ export const merchantFeatureSchema = z.object({
   custodialEnabled: z.boolean(),
   nonCustodialEnabled: z.boolean(),
   priorityProcessing: z.boolean(),
-  planCode: z.enum(["starter", "custom_selective", "custom_enterprise"])
+  planCode: z.enum(["free", "premium", "custom"])
 });
 
 export type MerchantFeatures = z.infer<typeof merchantFeatureSchema>;

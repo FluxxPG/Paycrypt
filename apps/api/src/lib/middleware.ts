@@ -10,7 +10,7 @@ export interface AuthenticatedRequest extends Request {
   actor?: {
     userId: string;
     merchantId: string;
-    role: "merchant" | "admin" | "super_admin";
+    role: "merchant" | "admin" | "super_admin" | "employer";
     requiresPasswordSetup: boolean;
   };
   apiKey?: {
@@ -24,7 +24,7 @@ export interface AuthenticatedRequest extends Request {
 const loadActorForUser = async (userId: string) => {
   const userResult = await query<{
     merchant_id: string;
-    role: "merchant" | "admin" | "super_admin";
+    role: "merchant" | "admin" | "super_admin" | "employer";
     must_change_password: boolean;
   }>(
     "select merchant_id, role, must_change_password from users where id = $1 limit 1",

@@ -1,13 +1,28 @@
 import { config } from "dotenv";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import dns from "node:dns";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 import { Server } from "socket.io";
 import type { RealtimePaymentEvent } from "@cryptopay/shared";
 import { Pool } from "pg";
 
-config();
+const currentFile = fileURLToPath(import.meta.url);
+const currentDir = path.dirname(currentFile);
+const repoRoot = path.resolve(currentDir, "../../../");
+const loadEnvFile = (envPath: string, override: boolean) => {
+  if (existsSync(envPath)) {
+    config({ path: envPath, override });
+  }
+};
+
+loadEnvFile(path.join(repoRoot, ".env"), false);
+loadEnvFile(path.join(process.cwd(), ".env"), false);
+loadEnvFile(path.join(repoRoot, ".env.local"), true);
+loadEnvFile(path.join(process.cwd(), ".env.local"), true);
 const originalLookup = dns.lookup.bind(dns);
 dns.lookup = ((hostname, options, callback) => {
   if (typeof options === "function") {
@@ -24,16 +39,40 @@ dns.lookup = ((hostname, options, callback) => {
 }) as typeof dns.lookup;
 
 const wsPort = Number(process.env.WS_PORT ?? 4001);
+const parseClusterNodes = (value: string) =>
+  value
+    .split(",")
+    .map((node) => node.trim())
+    .filter(Boolean)
+    .map((node) => {
+      const [host, port] = node.split(":");
+      return { host, port: port ? Number(port) : 6379 };
+    });
+
+const redisClusterNodes = process.env.REDIS_CLUSTER_NODES;
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-const redis = new Redis(redisUrl, {
-  maxRetriesPerRequest: null
-});
+const redis = redisClusterNodes
+  ? new Redis.Cluster(parseClusterNodes(redisClusterNodes), {
+      scaleReads: "slave",
+      redisOptions: { maxRetriesPerRequest: null }
+    })
+  : new Redis(redisUrl, {
+      maxRetriesPerRequest: null
+    });
 const instanceId = randomUUID();
 const needsSsl =
   (process.env.DATABASE_URL ?? "").includes(".supabase.co") ||
   (process.env.DATABASE_URL ?? "").includes("sslmode=");
+
+const poolConfig = {
+  max: process.env.PGPOOL_MAX ? Number(process.env.PGPOOL_MAX) : 50,
+  min: process.env.PGPOOL_MIN ? Number(process.env.PGPOOL_MIN) : 0,
+  idleTimeoutMillis: process.env.PGPOOL_IDLE_TIMEOUT_MS ? Number(process.env.PGPOOL_IDLE_TIMEOUT_MS) : 30_000,
+  connectionTimeoutMillis: process.env.PGPOOL_CONN_TIMEOUT_MS ? Number(process.env.PGPOOL_CONN_TIMEOUT_MS) : 2_000
+};
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ...poolConfig,
   ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {})
 });
 const wsNodeId = process.env.WS_NODE_ID ?? instanceId;

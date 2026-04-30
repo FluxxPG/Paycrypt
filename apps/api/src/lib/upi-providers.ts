@@ -10,6 +10,20 @@ import type {
   UPIProvider
 } from "@cryptopay/shared";
 import { AppError } from "./errors.js";
+import { withCircuitBreaker } from "./circuit-breaker.js";
+
+const providerFetch = async (provider: string, input: RequestInfo | URL, init?: RequestInit) => {
+  return withCircuitBreaker(
+    `upi:${provider}`,
+    async () => {
+      return fetch(input, init);
+    },
+    {
+      failureThreshold: 5,
+      openDurationMs: 30_000
+    }
+  );
+};
 
 export class PhonePeProvider implements UPIProviderInterface {
   private apiKey: string;
@@ -55,7 +69,7 @@ export class PhonePeProvider implements UPIProviderInterface {
       const payload = JSON.stringify(phonePeRequest);
       const xVerify = this.generateSignature(payload) + "###" + crypto.randomUUID();
 
-      const response = await fetch(`${this.baseUrl}/pay`, {
+      const response = await providerFetch("phonepe", `${this.baseUrl}/pay`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -100,14 +114,18 @@ export class PhonePeProvider implements UPIProviderInterface {
     try {
       const xVerify = this.generateSignature(`/pg/v1/status/${this.apiKey}/${paymentId}` + this.secretKey);
       
-      const response = await fetch(`${this.baseUrl}/pg/v1/status/${this.apiKey}/${paymentId}`, {
+      const response = await providerFetch(
+        "phonepe",
+        `${this.baseUrl}/pg/v1/status/${this.apiKey}/${paymentId}`,
+        {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
           "X-VERIFY": xVerify,
           "X-CLIENT-ID": this.apiKey
         }
-      });
+        }
+      );
 
       const data = await response.json();
 
@@ -184,7 +202,7 @@ export class PhonePeProvider implements UPIProviderInterface {
       const testPayload = JSON.stringify({ test: "connection" });
       const xVerify = crypto.createHash("sha256").update(testPayload + credentials.secretKey).digest("hex") + "###test";
       
-      const response = await fetch(`${this.baseUrl}/pay`, {
+      const response = await providerFetch("phonepe", `${this.baseUrl}/pay`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -265,13 +283,17 @@ export class PaytmProvider implements UPIProviderInterface {
       const bodyPayload = JSON.stringify(paytmRequest.body);
       paytmRequest.head.signature = this.generateSignature(bodyPayload);
 
-      const response = await fetch(`${this.baseUrl}/theia/api/v1/initiateTransaction?mid=${this.apiKey}&orderId=${request.paymentId}`, {
+      const response = await providerFetch(
+        "paytm",
+        `${this.baseUrl}/theia/api/v1/initiateTransaction?mid=${this.apiKey}&orderId=${request.paymentId}`,
+        {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(paytmRequest)
-      });
+        }
+      );
 
       const data = await response.json();
 
@@ -305,12 +327,16 @@ export class PaytmProvider implements UPIProviderInterface {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/merchant-status/api/v1/getPaymentStatus?mid=${this.apiKey}&orderId=${paymentId}`, {
+      const response = await providerFetch(
+        "paytm",
+        `${this.baseUrl}/merchant-status/api/v1/getPaymentStatus?mid=${this.apiKey}&orderId=${paymentId}`,
+        {
         method: "GET",
         headers: {
           "Content-Type": "application/json"
         }
-      });
+        }
+      );
 
       const data = await response.json();
 
@@ -383,12 +409,16 @@ export class PaytmProvider implements UPIProviderInterface {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${credentials.apiKey.includes("test") ? "https://securegw-stage.paytm.in" : "https://securegw.paytm.in"}/merchant-status/api/v1/getPaymentStatus?mid=${credentials.apiKey}&orderId=test`, {
+      const response = await providerFetch(
+        "paytm",
+        `${credentials.apiKey.includes("test") ? "https://securegw-stage.paytm.in" : "https://securegw.paytm.in"}/merchant-status/api/v1/getPaymentStatus?mid=${credentials.apiKey}&orderId=test`,
+        {
         method: "GET",
         headers: {
           "Content-Type": "application/json"
         }
-      });
+        }
+      );
 
       return {
         success: response.status < 500,
@@ -446,7 +476,7 @@ export class RazorpayProvider implements UPIProviderInterface {
         contact: request.customerPhone
       };
 
-      const response = await fetch(`${this.baseUrl}/orders`, {
+      const response = await providerFetch("razorpay", `${this.baseUrl}/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -488,7 +518,7 @@ export class RazorpayProvider implements UPIProviderInterface {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/orders/${paymentId}/payments`, {
+      const response = await providerFetch("razorpay", `${this.baseUrl}/orders/${paymentId}/payments`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -572,7 +602,7 @@ export class RazorpayProvider implements UPIProviderInterface {
     try {
       const authHeader = "Basic " + Buffer.from(`${credentials.apiKey}:${credentials.secretKey}`).toString("base64");
       
-      const response = await fetch(`${this.baseUrl}/accounts`, {
+      const response = await providerFetch("razorpay", `${this.baseUrl}/accounts`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -635,7 +665,7 @@ export class FreechargeProvider implements UPIProviderInterface {
 
       const signature = this.generateSignature(JSON.stringify(freechargeRequest));
 
-      const response = await fetch(`${this.baseUrl}/v1/payments/create`, {
+      const response = await providerFetch("freecharge", `${this.baseUrl}/v1/payments/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -675,7 +705,7 @@ export class FreechargeProvider implements UPIProviderInterface {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/payments/status/${paymentId}`, {
+      const response = await providerFetch("freecharge", `${this.baseUrl}/v1/payments/status/${paymentId}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -754,7 +784,7 @@ export class FreechargeProvider implements UPIProviderInterface {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/health`, {
+      const response = await providerFetch("freecharge", `${this.baseUrl}/v1/health`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",

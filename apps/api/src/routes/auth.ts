@@ -20,7 +20,7 @@ authRouter.post("/login", async (req, res) => {
   const result = await query<{
     id: string;
     password_hash: string;
-    role: "merchant" | "admin" | "super_admin";
+    role: "merchant" | "admin" | "super_admin" | "employer";
     merchant_id: string;
     must_change_password: boolean;
   }>(
@@ -84,7 +84,7 @@ authRouter.post("/refresh", async (req, res) => {
     }
 
     const accessToken = signAccessToken(payload);
-    const userResult = await query<{ role: "merchant" | "admin" | "super_admin"; merchant_id: string; must_change_password: boolean }>(
+    const userResult = await query<{ role: "merchant" | "admin" | "super_admin" | "employer"; merchant_id: string; must_change_password: boolean }>(
       "select role, merchant_id, must_change_password from users where id = $1 limit 1",
       [payload.sub]
     );

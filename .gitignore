@@ -5,8 +5,11 @@ build
 .turbo
 .env
 .env.local
+.env.*.local
+.env.vercel.production
 coverage
 *.log
+*.tsbuildinfo
 logs/
 .DS_Store
 apps/web/.next

@@ -8,5 +8,6 @@ export const createApiKeyPair = () => {
 
 export const createPaymentReference = () => `pay_${nanoid(18)}`;
 export const createPaymentLinkReference = () => `plink_${nanoid(18)}`;
+export const createWebhookSecret = () => `whsec_${nanoid(32)}`;
 export const createWalletAddress = (network: string) =>
   `${network.toLowerCase()}_${nanoid(28)}`;

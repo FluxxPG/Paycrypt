@@ -17,7 +17,10 @@ const queueNames = {
   binance: "binance-transaction-monitor",
   blockchain: "blockchain-monitor",
   webhooks: "webhook-dispatcher",
-  settlements: "settlement-processor"
+  settlements: "settlement-processor",
+  withdrawals: "withdrawal-processor",
+  batchPayouts: "batch-payout-processor",
+  automations: "automation-executor"
 } as const;
 
 const parseRedisVersion = (info: string) => {
@@ -123,5 +126,8 @@ export const queues = {
   binance: new QueueFacade(queueNames.binance),
   blockchain: new QueueFacade(queueNames.blockchain),
   webhooks: new QueueFacade(queueNames.webhooks),
-  settlements: new QueueFacade(queueNames.settlements)
+  settlements: new QueueFacade(queueNames.settlements),
+  withdrawals: new QueueFacade(queueNames.withdrawals),
+  batchPayouts: new QueueFacade(queueNames.batchPayouts),
+  automations: new QueueFacade(queueNames.automations)
 };

@@ -90,9 +90,9 @@ output "jwt_secret_arn" {
   value       = aws_secretsmanager_secret.jwt_secret.arn
 }
 
-output "database_url_secret_arn" {
-  description = "Database URL secret ARN"
-  value       = aws_secretsmanager_secret.database_url.arn
+output "supabase_url_secret_arn" {
+  description = "Supabase URL secret ARN"
+  value       = aws_secretsmanager_secret.supabase_url.arn
 }
 
 output "sns_alerts_topic_arn" {

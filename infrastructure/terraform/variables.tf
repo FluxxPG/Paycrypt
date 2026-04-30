@@ -15,7 +15,7 @@ variable "environment" {
 variable "aws_region" {
   description = "AWS region for deployment"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
 }
 
 variable "vpc_cidr" {
@@ -27,7 +27,7 @@ variable "vpc_cidr" {
 variable "availability_zones" {
   description = "List of availability zones"
   type        = list(string)
-  default     = ["us-east-1a", "us-east-1b", "us-east-1c"]
+  default     = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
 }
 
 variable "private_subnet_cidrs" {
@@ -57,7 +57,7 @@ variable "acm_certificate_arn" {
 variable "ecr_repository_url" {
   description = "ECR repository URL for container images"
   type        = string
-  default     = ""
+  default     = "359924468730.dkr.ecr.ap-south-1.amazonaws.com/paycrypt"
 }
 
 variable "image_tag" {
@@ -95,6 +95,68 @@ variable "api_gateway_max_capacity" {
   description = "Maximum capacity for API Gateway auto-scaling"
   type        = number
   default     = 20
+}
+
+# WebSocket Service Configuration
+variable "ws_cpu" {
+  description = "CPU units for WS task"
+  type        = number
+  default     = 256
+}
+
+variable "ws_memory" {
+  description = "Memory for WS task (MB)"
+  type        = number
+  default     = 512
+}
+
+variable "ws_desired_count" {
+  description = "Desired count of WS tasks"
+  type        = number
+  default     = 2
+}
+
+variable "ws_min_capacity" {
+  description = "Minimum capacity for WS auto-scaling"
+  type        = number
+  default     = 2
+}
+
+variable "ws_max_capacity" {
+  description = "Maximum capacity for WS auto-scaling"
+  type        = number
+  default     = 10
+}
+
+# Worker Service Configuration
+variable "worker_cpu" {
+  description = "CPU units for Worker task"
+  type        = number
+  default     = 512
+}
+
+variable "worker_memory" {
+  description = "Memory for Worker task (MB)"
+  type        = number
+  default     = 1024
+}
+
+variable "worker_desired_count" {
+  description = "Desired count of Worker tasks"
+  type        = number
+  default     = 2
+}
+
+variable "worker_min_capacity" {
+  description = "Minimum capacity for Worker auto-scaling"
+  type        = number
+  default     = 1
+}
+
+variable "worker_max_capacity" {
+  description = "Maximum capacity for Worker auto-scaling"
+  type        = number
+  default     = 10
 }
 
 # Database Configuration

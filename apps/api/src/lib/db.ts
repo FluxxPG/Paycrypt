@@ -18,10 +18,21 @@ dns.lookup = ((hostname, options, callback) => {
   return originalLookup(hostname, normalized as never, callback as never);
 }) as typeof dns.lookup;
 
-const needsSsl = env.DATABASE_URL.includes(".supabase.co") || env.DATABASE_URL.includes("sslmode=");
+const writeDatabaseUrl = env.DATABASE_URL_POOLED ?? env.DATABASE_URL;
+const readDatabaseUrl = env.DATABASE_READ_URL ?? writeDatabaseUrl;
+
+const needsSsl = writeDatabaseUrl.includes(".supabase.co") || writeDatabaseUrl.includes("sslmode=");
+
+const poolConfig = {
+  max: env.PGPOOL_MAX ?? 50,
+  min: env.PGPOOL_MIN ?? 0,
+  idleTimeoutMillis: env.PGPOOL_IDLE_TIMEOUT_MS ?? 30_000,
+  connectionTimeoutMillis: env.PGPOOL_CONN_TIMEOUT_MS ?? 2_000
+};
 
 export const db = new Pool({
-  connectionString: env.DATABASE_URL,
+  connectionString: writeDatabaseUrl,
+  ...poolConfig,
   ...(needsSsl
     ? {
         // Supabase direct Postgres connections require TLS; some Windows cert stores do not trust the chain by default.
@@ -30,8 +41,26 @@ export const db = new Pool({
     : {})
 });
 
+export const dbRead =
+  readDatabaseUrl === writeDatabaseUrl
+    ? db
+    : new Pool({
+        connectionString: readDatabaseUrl,
+        ...poolConfig,
+        ...(needsSsl
+          ? {
+              ssl: { rejectUnauthorized: false }
+            }
+          : {})
+      });
+
 export const query = async <T extends QueryResultRow>(text: string, params: unknown[] = []) => {
   const result = await db.query<T>(text, params);
+  return result;
+};
+
+export const queryRead = async <T extends QueryResultRow>(text: string, params: unknown[] = []) => {
+  const result = await dbRead.query<T>(text, params);
   return result;
 };
 

@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@cryptopay/shared": "1.0.0",
-    "bullmq": "^5.34.0",
+    "bullmq": "^5.76.4",
     "dotenv": "^16.4.5",
-    "ioredis": "^5.4.1",
-    "pg": "^8.13.1"
+    "ioredis": "^5.10.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

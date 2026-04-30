@@ -383,12 +383,17 @@ export const WalletsPanel = () => {
                     </option>
                   ))}
                 </select>
-                <input
+                <select
                   value={nonCustodialForm.provider}
                   onChange={(event) => setNonCustodialForm((prev) => ({ ...prev, provider: event.target.value }))}
-                  placeholder="Wallet provider"
                   className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
-                />
+                >
+                  {["Trust Wallet", "MetaMask", "Phantom", "Merchant wallet"].map((provider) => (
+                    <option key={provider} value={provider} className="bg-slate-950">
+                      {provider}
+                    </option>
+                  ))}
+                </select>
                 <input
                   value={nonCustodialForm.address}
                   onChange={(event) => setNonCustodialForm((prev) => ({ ...prev, address: event.target.value }))}

@@ -1,14 +1,16 @@
 # AWS EC2 Deployment
 
-This stack includes an Nginx reverse proxy container in front of API + websocket services. You can terminate TLS at ALB/CloudFront and forward plain HTTP to Nginx on port 80.
+The live backend now runs on K3s Kubernetes inside the EC2 instance. Docker remains installed for image builds and local fallback, but Docker Compose is not the live runtime.
 
-## Services
+Live runtime:
 
-- `nginx` on `80` (reverse proxy to API + websocket)
-- `api` on `4000` (internal)
-- `ws` on `4001` (internal)
-- `worker` internal only
-- `redis` on `6379` internal only unless you explicitly need remote access
+- `edge-nginx` binds the EC2 origin ports `4000` and `4001`
+- `api` runs behind Nginx on Kubernetes service port `4000`
+- `ws` runs behind Nginx on Kubernetes service port `4001`
+- `worker` runs inside Kubernetes with health on `4002`
+- `redis` runs as a Kubernetes StatefulSet
+
+TLS and origin masking are handled upstream by CloudFront.
 
 ## Bootstrap
 
@@ -20,7 +22,7 @@ bash infra/aws/bootstrap-ec2.sh
 
 ## Deploy
 
-1. Clone the repo to `/opt/cryptopay/crypto-gateway-saas`
+1. Clone the repo to `/opt/paycrypt`
 2. Copy `.env.example` to `.env`
 3. Set production values for:
    - `DATABASE_URL`
@@ -38,25 +40,28 @@ bash infra/aws/bootstrap-ec2.sh
    - `APP_BASE_URL`
    - `NEXT_PUBLIC_API_BASE_URL`
    - `NEXT_PUBLIC_WS_URL`
-4. Run:
+4. Build and push backend service images:
 
 ```bash
-bash infra/aws/deploy.sh
+bash infra/kubernetes/ecr-push.sh
 ```
 
-## Optional boot persistence
-
-Copy the systemd unit:
+5. Deploy or refresh K3s workloads:
 
 ```bash
-sudo cp infra/aws/cryptopay-compose.service /etc/systemd/system/cryptopay-compose.service
-sudo systemctl daemon-reload
-sudo systemctl enable cryptopay-compose.service
-sudo systemctl start cryptopay-compose.service
+bash infra/kubernetes/k3s-deploy.sh
 ```
 
-## Load balancer guidance
+6. Cut CloudFront-facing ports to Kubernetes Nginx:
 
-- Route `api.yourdomain.com` (and/or websocket traffic) to Nginx `:80`
-- Keep `6379` and worker access inside the private security group
-- Deploy the frontend separately on Vercel and point it at the ALB URLs
+```bash
+bash infra/kubernetes/k3s-cutover.sh
+```
+
+## Edge Guidance
+
+- Route HTTPS traffic to the EC2 origin ports through CloudFront
+- Forward API traffic to `:4000`
+- Forward websocket / Socket.IO traffic to `:4001`
+- Keep Redis and worker access internal to the Kubernetes node/network
+- Deploy the frontend separately on Vercel and point it at CloudFront

@@ -9,7 +9,7 @@ import { apiFetch } from "../lib/authed-fetch";
 type InvoiceRow = {
   id: string;
   invoice_number: string;
-  plan_code: "starter" | "custom_selective" | "custom_enterprise";
+  plan_code: "free" | "premium" | "custom";
   status: "issued" | "paid" | "overdue" | "void" | string;
   billing_period_start: string;
   billing_period_end: string;
@@ -25,7 +25,7 @@ type InvoiceRow = {
 
 type SubscriptionSummary = {
   subscription?: {
-    plan_code: "starter" | "custom_selective" | "custom_enterprise";
+    plan_code: "free" | "premium" | "custom";
     status: string;
     monthly_price_inr: number | string;
     transaction_limit: number;
@@ -49,25 +49,25 @@ type SubscriptionSummary = {
 
 const plans = [
   {
-    code: "starter",
-    title: "Starter",
+    code: "free",
+    title: "Free",
     price: "Free",
     limit: "5,000 tx",
-    note: "1% platform fee · custodial only"
+    note: "1% platform fee - custodial routes"
   },
   {
-    code: "custom_selective",
-    title: "Custom Selective",
-    price: "Custom pricing",
+    code: "premium",
+    title: "Premium",
+    price: "INR 15,000",
     limit: "20,000 tx",
-    note: "2% platform fee · one non-custodial wallet (admin unlock)"
+    note: "1% platform fee - priority processing and non-custodial access"
   },
   {
-    code: "custom_enterprise",
-    title: "Custom Enterprise",
+    code: "custom",
+    title: "Custom",
     price: "Custom pricing",
     limit: "Unlimited",
-    note: "Admin editable fee % · infinite non-custodial wallets · setup 10,000 INR/USDT"
+    note: "Admin-managed pricing with editable fee policy and enterprise controls"
   }
 ] as const;
 
@@ -103,7 +103,7 @@ export const SubscriptionPanel = () => {
     void load();
   }, []);
 
-  const currentPlan = summary?.subscription?.plan_code ?? "starter";
+  const currentPlan = summary?.subscription?.plan_code ?? "free";
   const used = summary?.usage.reduce((sum, item) => sum + Number(item.total), 0) ?? 0;
   const limit = Number(summary?.subscription?.transaction_limit ?? 0);
   const billing = summary?.billing ?? {
@@ -115,11 +115,11 @@ export const SubscriptionPanel = () => {
     currency: "INR"
   };
   const remaining = useMemo(() => {
-    if (!limit) return "Unlimited";
+    if (!limit || limit < 0) return "Unlimited";
     return `${Math.max(0, limit - used).toLocaleString("en-IN")} remaining`;
   }, [limit, used]);
 
-  const changePlan = async (planCode: "starter" | "custom_selective" | "custom_enterprise") => {
+  const changePlan = async (planCode: "free" | "premium" | "custom") => {
     setLoading(true);
     try {
       await apiFetch("/dashboard/subscriptions/plan", {
@@ -171,7 +171,7 @@ export const SubscriptionPanel = () => {
           <div className="mt-6 space-y-3 text-sm text-slate-300">
             <div className="glass-soft rounded-2xl p-4">Status: {summary.subscription?.status ?? "inactive"}</div>
             <div className="glass-soft rounded-2xl p-4">
-              Monthly usage: {used.toLocaleString("en-IN")} / {limit ? limit.toLocaleString("en-IN") : "Unlimited"}
+              Monthly usage: {used.toLocaleString("en-IN")} / {limit > 0 ? limit.toLocaleString("en-IN") : "Unlimited"}
             </div>
             <div className="glass-soft rounded-2xl p-4">{remaining}</div>
             <div className="glass-soft rounded-2xl p-4">
@@ -220,10 +220,10 @@ export const SubscriptionPanel = () => {
                   </div>
                   <Button
                     variant={currentPlan === plan.code ? "secondary" : "default"}
-                    disabled={loading || currentPlan === plan.code || plan.code === "custom_enterprise"}
+                    disabled={loading || currentPlan === plan.code || plan.code === "custom"}
                     onClick={() => changePlan(plan.code)}
                   >
-                    {currentPlan === plan.code ? "Active" : plan.code === "custom_enterprise" ? "Admin only" : "Switch"}
+                    {currentPlan === plan.code ? "Active" : plan.code === "custom" ? "Admin only" : "Switch"}
                   </Button>
                 </div>
               </div>

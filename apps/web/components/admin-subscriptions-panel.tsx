@@ -18,7 +18,7 @@ type Merchant = {
 export const AdminSubscriptionsPanel = () => {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [selectedMerchantId, setSelectedMerchantId] = useState<string>("");
-  const [planCode, setPlanCode] = useState<"starter" | "custom_selective" | "custom_enterprise">("custom_selective");
+  const [planCode, setPlanCode] = useState<"free" | "premium" | "custom">("premium");
   const [customMonthlyPriceInr, setCustomMonthlyPriceInr] = useState("0");
   const [customTransactionLimit, setCustomTransactionLimit] = useState("0");
   const [customSetupFeeInr, setCustomSetupFeeInr] = useState("10000");
@@ -55,12 +55,11 @@ export const AdminSubscriptionsPanel = () => {
         method: "POST",
         body: JSON.stringify({
           planCode,
-          monthlyPriceInr: planCode === "custom_enterprise" ? Number(customMonthlyPriceInr) : undefined,
-          transactionLimit: planCode === "custom_enterprise" ? Number(customTransactionLimit) : undefined,
-          setupFeeInr: planCode === "custom_enterprise" ? Number(customSetupFeeInr) : undefined,
-          setupFeeUsdt: planCode === "custom_enterprise" ? Number(customSetupFeeUsdt) : undefined,
-          platformFeePercent:
-            planCode === "custom_enterprise" ? Number(platformFeePercent) : planCode === "custom_selective" ? 2 : 1
+          monthlyPriceInr: planCode === "custom" ? Number(customMonthlyPriceInr) : undefined,
+          transactionLimit: planCode === "custom" ? Number(customTransactionLimit) : undefined,
+          setupFeeInr: planCode === "custom" ? Number(customSetupFeeInr) : undefined,
+          setupFeeUsdt: planCode === "custom" ? Number(customSetupFeeUsdt) : undefined,
+          platformFeePercent: planCode === "custom" ? Number(platformFeePercent) : 1
         })
       });
       const payload = await apiFetch<{ data: Merchant[] }>("/admin/merchants");
@@ -102,14 +101,14 @@ export const AdminSubscriptionsPanel = () => {
               onChange={(event) => setPlanCode(event.target.value as typeof planCode)}
               className="glass-soft w-full rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
             >
-              <option value="starter" className="bg-slate-900">
-                Starter
+              <option value="free" className="bg-slate-900">
+                Free
               </option>
-              <option value="custom_selective" className="bg-slate-900">
-                Custom Selective
+              <option value="premium" className="bg-slate-900">
+                Premium
               </option>
-              <option value="custom_enterprise" className="bg-slate-900">
-                Custom Enterprise
+              <option value="custom" className="bg-slate-900">
+                Custom
               </option>
             </select>
           </div>
@@ -119,7 +118,7 @@ export const AdminSubscriptionsPanel = () => {
             </Button>
           </div>
         </div>
-        {planCode === "custom_enterprise" ? (
+        {planCode === "custom" ? (
           <div className="mt-5 grid gap-4 md:grid-cols-5">
             <div>
               <label className="mb-2 block text-sm text-slate-300">Monthly price INR</label>
@@ -146,7 +145,7 @@ export const AdminSubscriptionsPanel = () => {
         {selectedMerchant ? (
           <div className="mt-5 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
             <div className="glass-soft rounded-2xl p-4">Selected: {selectedMerchant.name}</div>
-            <div className="glass-soft rounded-2xl p-4">Plan: {selectedMerchant.plan_code ?? "custom_selective"}</div>
+            <div className="glass-soft rounded-2xl p-4">Plan: {selectedMerchant.plan_code ?? "free"}</div>
             <div className="glass-soft rounded-2xl p-4">
               Status: {selectedMerchant.subscription_status ?? "inactive"}
             </div>

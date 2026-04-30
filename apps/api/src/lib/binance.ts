@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { env } from "../env.js";
+import { withCircuitBreaker } from "./circuit-breaker.js";
 
 type BinanceDepositAddress = {
   address: string;
@@ -12,6 +13,12 @@ type BinanceBalance = {
   asset: string;
   free: string;
   locked: string;
+};
+
+type BinanceWithdrawalApplyResponse = {
+  id?: string;
+  msg?: string;
+  success?: boolean;
 };
 
 export type BinanceCredentials = {
@@ -49,20 +56,30 @@ const signedRequest = async <T>(
   query.append("signature", signature);
 
   const method = options.method ?? "GET";
-  const response = await fetch(`${baseUrl}${path}?${query.toString()}`, {
-    method,
-    headers: {
-      Accept: "application/json",
-      "X-MBX-APIKEY": apiKey
+
+  return withCircuitBreaker(
+    "binance",
+    async () => {
+      const response = await fetch(`${baseUrl}${path}?${query.toString()}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          "X-MBX-APIKEY": apiKey
+        }
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Binance request failed: ${response.status} ${text}`);
+      }
+
+      return (await response.json()) as T;
+    },
+    {
+      failureThreshold: 5,
+      openDurationMs: 30_000
     }
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Binance request failed: ${response.status} ${text}`);
-  }
-
-  return (await response.json()) as T;
+  );
 };
 
 const networkMap: Record<string, string> = {
@@ -108,6 +125,53 @@ export const getBinanceDepositHistory = async (asset?: string, credentials?: Bin
     asset ? { coin: asset } : {},
     { credentials }
   );
+  return response ?? [];
+};
+
+export const applyBinanceWithdrawal = async (
+  input: {
+    asset: string;
+    network: string;
+    amount: string | number;
+    address: string;
+    addressTag?: string;
+  },
+  credentials?: BinanceCredentials
+) => {
+  const binanceNetwork = networkMap[input.network] ?? input.network;
+  const response = await signedRequest<BinanceWithdrawalApplyResponse>(
+    "/sapi/v1/capital/withdraw/apply",
+    {
+      coin: input.asset,
+      network: binanceNetwork,
+      amount: input.amount,
+      address: input.address,
+      addressTag: input.addressTag
+    },
+    { credentials, method: "POST" }
+  );
+
+  if (!response?.id) {
+    throw new Error(response?.msg ?? "Binance withdrawal did not return a provider reference");
+  }
+
+  return response;
+};
+
+export const getBinanceWithdrawalHistory = async (asset?: string, credentials?: BinanceCredentials) => {
+  const response = await signedRequest<
+    Array<{
+      id?: string;
+      amount?: string;
+      coin?: string;
+      txId?: string;
+      status?: number;
+      address?: string;
+      applyTime?: string;
+      completeTime?: string;
+      network?: string;
+    }>
+  >("/sapi/v1/capital/withdraw/history", asset ? { coin: asset } : {}, { credentials });
   return response ?? [];
 };
 

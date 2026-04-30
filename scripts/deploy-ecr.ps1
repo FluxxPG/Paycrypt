@@ -13,6 +13,37 @@ $SERVICES = @(
   @{ name = "worker-service"; path = "."; dockerfile = "apps/worker/Dockerfile" }
 )
 
+# Create ECR repositories if they don't exist
+Write-Host "Creating ECR repositories..."
+foreach ($service in $SERVICES) {
+  $repo_name = "${PROJECT_NAME}/$($service.name)"
+  try {
+    aws ecr describe-repositories --repository-names $repo_name --region $AWS_REGION 2>&1 | Out-Null
+    Write-Host "Repository $repo_name already exists"
+  } catch {
+    Write-Host "Creating repository: $repo_name"
+    aws ecr create-repository --repository-name $repo_name --region $AWS_REGION
+    $lifecyclePolicy = @{
+      rules = @(
+        @{
+          rulePriority = 1
+          description  = "Keep last 30 images"
+          selection = @{
+            tagStatus   = "any"
+            countType   = "imageCountMoreThan"
+            countNumber = 30
+          }
+          action = @{
+            type = "expire"
+          }
+        }
+      )
+    }
+    $lifecyclePolicyJson = $lifecyclePolicy | ConvertTo-Json -Depth 10
+    aws ecr put-lifecycle-policy --repository-name $repo_name --region $AWS_REGION --lifecycle-policy-text $lifecyclePolicyJson
+  }
+}
+
 Write-Host "Logging in to ECR..."
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 

@@ -6,7 +6,7 @@ import { env } from "../env.js";
 export interface JwtPayload {
   sub: string;
   merchantId: string;
-  role: "merchant" | "admin" | "super_admin";
+  role: "merchant" | "admin" | "super_admin" | "employer";
 }
 
 export const signAccessToken = (payload: JwtPayload) =>

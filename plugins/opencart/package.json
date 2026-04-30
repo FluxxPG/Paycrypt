@@ -1,0 +1,13 @@
+{
+  "name": "@paycrypt/opencart-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@cryptopay/sdk": "1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

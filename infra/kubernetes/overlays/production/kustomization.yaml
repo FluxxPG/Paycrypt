@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - autoscaling.yaml
+images:
+  - name: paycrypt-api
+    newName: 359924468730.dkr.ecr.ap-south-1.amazonaws.com/paycrypt/api-gateway
+    newTag: current
+  - name: paycrypt-ws
+    newName: 359924468730.dkr.ecr.ap-south-1.amazonaws.com/paycrypt/ws-service
+    newTag: current
+  - name: paycrypt-worker
+    newName: 359924468730.dkr.ecr.ap-south-1.amazonaws.com/paycrypt/worker-service
+    newTag: current
