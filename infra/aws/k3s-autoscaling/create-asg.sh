@@ -49,7 +49,13 @@ cat >"$USER_DATA_FILE" <<EOF
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl awscli
+apt-get install -y curl unzip
+
+# Install AWS CLI v2 (Ubuntu 24.04 may not ship awscli apt package)
+cd /tmp
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+unzip -q awscliv2.zip
+./aws/install --update || true
 
 REGION="${AWS_REGION}"
 TOKEN=\$(aws ssm get-parameter --name "${TOKEN_PARAM_NAME}" --with-decryption --query Parameter.Value --output text --region "\$REGION")
