@@ -60,7 +60,14 @@ unzip -q awscliv2.zip
 REGION="${AWS_REGION}"
 TOKEN=\$(aws ssm get-parameter --name "${TOKEN_PARAM_NAME}" --with-decryption --query Parameter.Value --output text --region "\$REGION")
 
-curl -sfL https://get.k3s.io | K3S_URL="${K3S_SERVER_URL}" K3S_TOKEN="\$TOKEN" sh -s - agent --node-label paycrypt.io/pool=default
+# Ensure Kubernetes nodes have an AWS providerID so Cluster Autoscaler can map them.
+IID=\$(curl -fsS http://169.254.169.254/latest/meta-data/instance-id)
+AZ=\$(curl -fsS http://169.254.169.254/latest/meta-data/placement/availability-zone)
+PROVIDER_ID=\"aws:///\${AZ}/\${IID}\"
+
+curl -sfL https://get.k3s.io | K3S_URL="${K3S_SERVER_URL}" K3S_TOKEN="\$TOKEN" sh -s - agent \
+  --node-label paycrypt.io/pool=default \
+  --kubelet-arg provider-id=\${PROVIDER_ID}
 EOF
 
 USER_DATA_B64="$(base64 -w0 <"$USER_DATA_FILE")"
