@@ -54,15 +54,21 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [copied, setCopied] = useState(false);
   const [intentError, setIntentError] = useState(false);
+  const [rerouting, setRerouting] = useState(false);
+  const [livePayment, setLivePayment] = useState<UPICheckoutPayment>(payment);
 
   useEffect(() => {
     const tick = () => {
-      setSecondsLeft(Math.max(0, Math.floor((new Date(payment.expires_at).getTime() - Date.now()) / 1000)));
+      setSecondsLeft(Math.max(0, Math.floor((new Date(livePayment.expires_at).getTime() - Date.now()) / 1000)));
     };
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [payment.expires_at]);
+  }, [livePayment.expires_at]);
+
+  useEffect(() => {
+    setLivePayment(payment);
+  }, [payment]);
 
   const handleCopyToClipboard = async (text: string) => {
     try {
@@ -75,13 +81,35 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
   };
 
   const handleUPIIntent = () => {
-    if (payment.upi_intent_url) {
+    if (livePayment.upi_intent_url) {
       try {
-        window.location.href = payment.upi_intent_url;
+        window.location.href = livePayment.upi_intent_url;
       } catch (error) {
         setIntentError(true);
         console.error("Failed to open UPI intent:", error);
       }
+    }
+  };
+
+  const rerouteHandle = async () => {
+    setRerouting(true);
+    try {
+      const res = await fetch(`/api/public/upi-payments/${livePayment.id}/reroute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.message ?? "Reroute failed");
+      }
+      setLivePayment(payload as UPICheckoutPayment);
+      setIntentError(false);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : "Failed to reroute UPI handle");
+    } finally {
+      setRerouting(false);
     }
   };
 
@@ -154,7 +182,7 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
       <Card className="p-8">
         <Badge className="mb-4">UPI Payment</Badge>
         <h1 className="text-4xl font-semibold text-white">Complete your UPI payment</h1>
-        <p className="mt-2 text-slate-300">{payment.description}</p>
+        <p className="mt-2 text-slate-300">{livePayment.description}</p>
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <div className="glass-soft rounded-2xl p-4">
@@ -162,7 +190,7 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
               <Smartphone className="h-4 w-4" /> UPI Provider
             </div>
             <p className="mt-3 text-xl font-medium text-white">
-              {getProviderDisplayName(payment.upi_provider)}
+              {getProviderDisplayName(livePayment.upi_provider)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               Unified Payments Interface
@@ -176,18 +204,39 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
           </div>
         </div>
 
+        {livePayment.upi_provider === "manual" && (livePayment as any).upi_vpa ? (
+          <div className="mt-6 glass-soft rounded-3xl p-5">
+            <div className="flex items-center justify-between text-sm text-slate-400">
+              <span>UPI VPA</span>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 text-cyan-200"
+                onClick={() => handleCopyToClipboard(String((livePayment as any).upi_vpa))}
+              >
+                <Copy className="h-4 w-4" /> Copy
+              </button>
+            </div>
+            <p className="mt-3 break-all font-mono text-sm text-white">{String((livePayment as any).upi_vpa)}</p>
+            <div className="mt-3">
+              <SimpleButton onClick={rerouteHandle} variant="outline" className="w-full" disabled={rerouting}>
+                {rerouting ? "Rotating handle..." : "Try another UPI handle"}
+              </SimpleButton>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 glass-soft rounded-3xl p-5">
           <div className="flex items-center justify-between text-sm text-slate-400">
             <span>Amount</span>
             <div className="flex items-center gap-2">
-              {getStatusIcon(payment.status)}
+              {getStatusIcon(livePayment.status)}
               <span className={getStatusColor(payment.status)}>
-                {payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
+                {livePayment.status.charAt(0).toUpperCase() + livePayment.status.slice(1)}
               </span>
             </div>
           </div>
           <p className="mt-3 text-3xl font-bold text-white">
-            {Number(payment.amount_fiat).toLocaleString("en-IN")} {payment.fiat_currency}
+            {Number(livePayment.amount_fiat).toLocaleString("en-IN")} {livePayment.fiat_currency}
           </p>
           <p className="mt-1 text-sm text-slate-300">
             Payable via any UPI app
@@ -195,7 +244,7 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
         </div>
 
         {/* UPI Intent Button */}
-        {payment.upi_intent_url && (
+        {livePayment.upi_intent_url && (
           <div className="mt-6">
             <SimpleButton
               onClick={handleUPIIntent}
@@ -240,13 +289,13 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
         {/* Action Buttons */}
         <div className="mt-6 flex gap-4">
           <SimpleButton
-            onClick={() => window.location.href = payment.cancel_url}
+            onClick={() => window.location.href = livePayment.cancel_url}
             variant="outline"
             className="flex-1"
           >
             Return to Merchant
           </SimpleButton>
-          {payment.upi_intent_url && (
+          {livePayment.upi_intent_url && (
             <SimpleButton
               onClick={handleUPIIntent}
               className="flex-1"
@@ -266,18 +315,18 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
           </p>
         </div>
 
-        {payment.upi_qr_code ? (
+        {livePayment.upi_qr_code ? (
           <>
             <div className="relative">
               <QRCodeSVG 
-                value={payment.upi_qr_code} 
+                value={livePayment.upi_qr_code} 
                 size={280} 
                 bgColor="transparent" 
                 fgColor="#ffffff" 
               />
               <div className="absolute -bottom-4 left-1/2 transform -translate-x-1/2 glass-soft rounded-full px-4 py-2">
                 <p className="text-xs font-medium text-white">
-                  {getProviderDisplayName(payment.upi_provider)}
+                  {getProviderDisplayName(livePayment.upi_provider)}
                 </p>
               </div>
             </div>
@@ -290,14 +339,14 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
                   <button
                     type="button"
                     className="inline-flex items-center gap-2 text-cyan-200"
-                    onClick={() => handleCopyToClipboard(payment.upi_qr_code || "")}
+                    onClick={() => handleCopyToClipboard(livePayment.upi_qr_code || "")}
                   >
                     <Copy className="h-4 w-4" />
                     {copied ? "Copied!" : "Copy"}
                   </button>
                 </div>
                 <p className="break-all font-mono text-xs text-white p-2 bg-black/20 rounded">
-                  {payment.upi_qr_code}
+                  {livePayment.upi_qr_code}
                 </p>
               </div>
             </div>
@@ -314,11 +363,11 @@ export const UPICheckoutPanel = ({ payment }: { payment: UPICheckoutPayment }) =
 
         <div className="mt-6 text-center">
           <p className="text-3xl font-bold text-white">
-            {Number(payment.amount_fiat).toLocaleString("en-IN")} {payment.fiat_currency}
+            {Number(livePayment.amount_fiat).toLocaleString("en-IN")} {livePayment.fiat_currency}
           </p>
           <p className="mt-2 text-sm text-slate-300">
             Status: <span className={`capitalize ${getStatusColor(payment.status)}`}>
-              {payment.status}
+              {livePayment.status}
             </span>
           </p>
         </div>

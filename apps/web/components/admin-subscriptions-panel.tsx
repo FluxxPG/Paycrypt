@@ -23,7 +23,7 @@ export const AdminSubscriptionsPanel = () => {
   const [customTransactionLimit, setCustomTransactionLimit] = useState("0");
   const [customSetupFeeInr, setCustomSetupFeeInr] = useState("10000");
   const [customSetupFeeUsdt, setCustomSetupFeeUsdt] = useState("10000");
-  const [platformFeePercent, setPlatformFeePercent] = useState("2");
+  const [platformFeePercent, setPlatformFeePercent] = useState("1");
   const [busy, setBusy] = useState(false);
 
   const selectedMerchant = useMemo(

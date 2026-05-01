@@ -309,7 +309,6 @@ export const changeSubscriptionPlan = async (
         upiProviderLimit,
         binanceEnabled,
         trustWalletEnabled,
-        trustWalletEnabled,
         metadata
       ]
     );

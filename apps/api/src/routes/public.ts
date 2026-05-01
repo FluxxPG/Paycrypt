@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createPaymentIntent, fetchPayment, fetchPaymentLink } from "../lib/services.js";
 import { upiPaymentService } from "../lib/upi-services.js";
 import { query } from "../lib/db.js";
+import { redisRateLimit } from "../lib/middleware.js";
 
 export const publicRouter = Router();
 
@@ -96,6 +97,105 @@ publicRouter.get("/upi-payments/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch UPI payment" });
   }
 });
+
+// Reroute / rotate manual UPI handle for this checkout (public, rate-limited).
+publicRouter.post(
+  "/upi-payments/:id/reroute",
+  redisRateLimit("public_upi_reroute", 12, 60),
+  async (req, res) => {
+    try {
+      const paymentId = String(req.params.id);
+      const paymentResult = await query<{
+        id: string;
+        merchant_id: string;
+        amount_fiat: string;
+        fiat_currency: string;
+        description: string;
+        status: string;
+        expires_at: string;
+        upi_provider: string | null;
+        upi_vpa: string | null;
+        upi_reroute_count: number | string | null;
+      }>(
+        `select id, merchant_id, amount_fiat, fiat_currency, description, status, expires_at, upi_provider, upi_vpa, upi_reroute_count
+         from payments
+         where id = $1 and payment_method = 'upi'
+         limit 1`,
+        [paymentId]
+      );
+      const payment = paymentResult.rows[0];
+      if (!payment) {
+        return res.status(404).json({ message: "UPI payment not found" });
+      }
+
+      if (new Date(payment.expires_at).getTime() <= Date.now()) {
+        return res.status(409).json({ message: "Payment session expired" });
+      }
+
+      if (!["created", "pending"].includes(String(payment.status))) {
+        return res.status(409).json({ message: "Payment can no longer be rerouted" });
+      }
+
+      const settings = await upiPaymentService.getMerchantUpiSettings(payment.merchant_id);
+      if (!settings?.refreshRerouteEnabled) {
+        return res.status(403).json({ message: "Reroute is disabled for this merchant" });
+      }
+      const currentCount = Number(payment.upi_reroute_count ?? 0);
+      const maxReroutes = Number(settings.maxReroutes ?? 3);
+      if (currentCount >= maxReroutes) {
+        return res.status(429).json({ message: "Reroute limit reached for this checkout session" });
+      }
+
+      // Switch to the next manual VPA/QR (safe rotation without PSP re-init).
+      const manual = await query<{ id: string; vpa: string; qr_payload: string | null }>(
+        `select id, vpa, qr_payload
+         from upi_manual_accounts
+         where merchant_id = $1 and is_active = true and vpa <> coalesce($2, '')
+         order by coalesce(last_used_at, 'epoch'::timestamptz) asc, priority asc, created_at asc
+         limit 1`,
+        [payment.merchant_id, payment.upi_vpa]
+      );
+      const next = manual.rows[0];
+      if (!next) {
+        return res.status(409).json({ message: "No alternative manual UPI handle available" });
+      }
+
+      const amount = Number(payment.amount_fiat ?? 0);
+      const currency = String(payment.fiat_currency ?? "INR");
+      const note = String(payment.description ?? "Paycrypt Checkout");
+      const intent = `upi://pay?pa=${encodeURIComponent(next.vpa)}&pn=${encodeURIComponent(
+        "Paycrypt Merchant"
+      )}&am=${encodeURIComponent(amount.toFixed(2))}&cu=${encodeURIComponent(currency)}&tn=${encodeURIComponent(note)}`;
+
+      await query(
+        `update payments
+         set upi_provider = 'manual',
+             upi_transaction_id = null,
+             upi_vpa = $2,
+             upi_intent_url = $3,
+             upi_qr_code = $4,
+             upi_route_version = upi_route_version + 1,
+             upi_reroute_count = upi_reroute_count + 1,
+             updated_at = now()
+         where id = $1`,
+        [paymentId, next.vpa, intent, next.qr_payload ?? intent]
+      );
+
+      await query(
+        `update upi_manual_accounts
+         set last_used_at = now(), usage_count = usage_count + 1, updated_at = now()
+         where id = $1`,
+        [next.id]
+      );
+
+      const updated = await query(`select * from payments where id = $1 limit 1`, [paymentId]);
+      return res.json(updated.rows[0]);
+    } catch (error) {
+      console.error("UPI reroute error:", error);
+      res.status(500).json({ message: "Failed to reroute UPI checkout" });
+    }
+  }
+);
 
 publicRouter.get("/payment_links/:id", async (req, res) => {
   const paymentLink = await fetchPaymentLink(req.params.id);

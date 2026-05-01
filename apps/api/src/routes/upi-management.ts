@@ -161,6 +161,85 @@ upiManagementRouter.delete("/providers/:providerName", async (req, res) => {
   }
 });
 
+// Manual UPI handle pool (multiple VPAs / QR payloads)
+upiManagementRouter.get("/manual-accounts", async (req, res) => {
+  try {
+    const merchantId = (req as any).actor.merchantId;
+    const result = await query(
+      `select id, label, vpa, qr_payload, priority, is_active, last_used_at, usage_count, created_at, updated_at
+       from upi_manual_accounts
+       where merchant_id = $1
+       order by priority asc, created_at asc`,
+      [merchantId]
+    );
+    res.json({ data: result.rows });
+  } catch (error) {
+    console.error("Get manual accounts error:", error);
+    res.status(500).json({ error: "Failed to fetch manual UPI accounts" });
+  }
+});
+
+upiManagementRouter.post("/manual-accounts", async (req, res) => {
+  try {
+    const merchantId = (req as any).actor.merchantId;
+    const current = await upiPaymentService.getMerchantUpiSettings(merchantId);
+    if (!current?.upiEntitled) {
+      return res.status(403).json({ error: "UPI is disabled by admin for this merchant" });
+    }
+    const { label, vpa, qrPayload, priority, isActive } = req.body as {
+      label?: string;
+      vpa: string;
+      qrPayload?: string;
+      priority?: number;
+      isActive?: boolean;
+    };
+    const normalizedVpa = String(vpa ?? "").trim().toLowerCase();
+    if (!normalizedVpa || !normalizedVpa.includes("@")) {
+      return res.status(400).json({ error: "Valid VPA is required (example: merchant@upi)" });
+    }
+    await query(
+      `insert into upi_manual_accounts (merchant_id, label, vpa, qr_payload, priority, is_active)
+       values ($1, $2, $3, $4, $5, $6)
+       on conflict (merchant_id, vpa) do update set
+         label = excluded.label,
+         qr_payload = excluded.qr_payload,
+         priority = excluded.priority,
+         is_active = excluded.is_active,
+         updated_at = now()`,
+      [
+        merchantId,
+        label ?? null,
+        normalizedVpa,
+        qrPayload ?? null,
+        Math.max(1, Number(priority ?? 1)),
+        Boolean(isActive ?? true)
+      ]
+    );
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error("Add manual account error:", error);
+    res.status(500).json({ error: "Failed to add manual UPI account" });
+  }
+});
+
+upiManagementRouter.delete("/manual-accounts/:id", async (req, res) => {
+  try {
+    const merchantId = (req as any).actor.merchantId;
+    const id = String(req.params.id);
+    const result = await query(
+      `delete from upi_manual_accounts where id = $1 and merchant_id = $2 returning id`,
+      [id, merchantId]
+    );
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Manual UPI account not found" });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Delete manual account error:", error);
+    res.status(500).json({ error: "Failed to delete manual UPI account" });
+  }
+});
+
 // Admin UPI Management Routes
 export const upiAdminRouter = Router();
 upiAdminRouter.use(requireJwt, requireAdmin());

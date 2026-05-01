@@ -19,6 +19,19 @@ type UPIProviderConfig = {
   isTested: boolean;
 };
 
+type ManualUpiAccount = {
+  id: string;
+  label: string | null;
+  vpa: string;
+  qr_payload: string | null;
+  priority: number;
+  is_active: boolean;
+  last_used_at: string | null;
+  usage_count: number | string;
+  created_at: string;
+  updated_at: string;
+};
+
 type UPIMerchantSettings = {
   upiEnabled: boolean;
   autoRoutingEnabled: boolean;
@@ -26,6 +39,9 @@ type UPIMerchantSettings = {
   manualModeEnabled: boolean;
   manualVpa?: string;
   manualQrUrl?: string;
+  rotationStrategy?: string;
+  refreshRerouteEnabled?: boolean;
+  maxReroutes?: number;
   allowedProviders: UPIProvider[];
   providerPriority: Record<string, number>;
   webhookSecret?: string;
@@ -38,6 +54,7 @@ export const UPISettingsPanel = () => {
   const router = useRouter();
   const [settings, setSettings] = useState<UPIMerchantSettings | null>(null);
   const [providers, setProviders] = useState<UPIProviderConfig[]>([]);
+  const [manualAccounts, setManualAccounts] = useState<ManualUpiAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
@@ -47,6 +64,13 @@ export const UPISettingsPanel = () => {
     secretKey: "",
     environment: "production" as "production" | "test",
     priority: 1
+  });
+  const [manualForm, setManualForm] = useState({
+    label: "",
+    vpa: "",
+    qrPayload: "",
+    priority: 1,
+    isActive: true
   });
 
   const fetchSettings = async () => {
@@ -63,8 +87,13 @@ export const UPISettingsPanel = () => {
     setProviders((response as any).providers || []);
   };
 
+  const fetchManualAccounts = async () => {
+    const response = await apiFetch<{ data: ManualUpiAccount[] }>("/upi/manual-accounts");
+    setManualAccounts((response as any).data || []);
+  };
+
   useEffect(() => {
-    void Promise.all([fetchSettings(), fetchProviders()]);
+    void Promise.all([fetchSettings(), fetchProviders(), fetchManualAccounts()]);
   }, []);
 
   const saveSettings = async () => {
@@ -134,6 +163,34 @@ export const UPISettingsPanel = () => {
       await fetchProviders();
     } catch {
       alert("Failed to add provider");
+    }
+  };
+
+  const addManualAccount = async () => {
+    try {
+      await apiFetch("/upi/manual-accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          label: manualForm.label.trim() || undefined,
+          vpa: manualForm.vpa.trim(),
+          qrPayload: manualForm.qrPayload.trim() || undefined,
+          priority: Number(manualForm.priority) || 1,
+          isActive: Boolean(manualForm.isActive)
+        })
+      });
+      setManualForm({ label: "", vpa: "", qrPayload: "", priority: 1, isActive: true });
+      await fetchManualAccounts();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to add manual UPI account");
+    }
+  };
+
+  const deleteManualAccount = async (id: string) => {
+    try {
+      await apiFetch(`/upi/manual-accounts/${id}`, { method: "DELETE" });
+      await fetchManualAccounts();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to delete manual UPI account");
     }
   };
 
@@ -405,6 +462,91 @@ export const UPISettingsPanel = () => {
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
                 placeholder="https://.../upi-qr.png (optional)"
               />
+              <div className="mt-2 rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-sm text-slate-300">
+                <p className="text-white">Manual handle pool (recommended)</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Add multiple VPAs / QR payloads to rotate load between accounts. Checkout can rotate handles on refresh
+                  when enabled by your merchant UPI policy.
+                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <input
+                    value={manualForm.label}
+                    onChange={(event) => setManualForm((cur) => ({ ...cur, label: event.target.value }))}
+                    placeholder="Label (optional)"
+                    className="glass-soft rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+                  />
+                  <input
+                    value={manualForm.vpa}
+                    onChange={(event) => setManualForm((cur) => ({ ...cur, vpa: event.target.value }))}
+                    placeholder="VPA (example: paycrypt@paytm)"
+                    className="glass-soft rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+                  />
+                  <input
+                    value={manualForm.qrPayload}
+                    onChange={(event) => setManualForm((cur) => ({ ...cur, qrPayload: event.target.value }))}
+                    placeholder="QR payload (upi://pay?... or provider QR string) (optional)"
+                    className="glass-soft rounded-xl px-4 py-3 text-sm text-slate-100 outline-none md:col-span-2"
+                  />
+                  <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                    <span>Active</span>
+                    <input
+                      type="checkbox"
+                      checked={manualForm.isActive}
+                      onChange={(event) => setManualForm((cur) => ({ ...cur, isActive: event.target.checked }))}
+                    />
+                  </div>
+                  <input
+                    value={String(manualForm.priority)}
+                    onChange={(event) =>
+                      setManualForm((cur) => ({ ...cur, priority: Math.max(1, Number(event.target.value || 1)) }))
+                    }
+                    placeholder="Priority"
+                    className="glass-soft rounded-xl px-4 py-3 text-sm text-slate-100 outline-none"
+                  />
+                  <Button
+                    onClick={addManualAccount}
+                    disabled={!manualForm.vpa.trim()}
+                    className="bg-cyan-400 text-slate-950 md:col-span-2"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add manual UPI handle
+                  </Button>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {manualAccounts.length ? (
+                    manualAccounts.map((acct) => (
+                      <div key={acct.id} className="glass-soft rounded-xl p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-white">
+                              {acct.label ? `${acct.label} • ` : ""}
+                              <span className="font-mono">{acct.vpa}</span>
+                            </p>
+                            <p className="mt-2 text-xs text-slate-400">
+                              Active: {acct.is_active ? "yes" : "no"} • Priority: {acct.priority} • Used:{" "}
+                              {Number(acct.usage_count ?? 0).toLocaleString("en-IN")}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Last used: {acct.last_used_at ? new Date(acct.last_used_at).toLocaleString() : "Never"}
+                            </p>
+                          </div>
+                          <Button onClick={() => deleteManualAccount(acct.id)} className="glass-soft text-red-400">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {acct.qr_payload ? (
+                          <p className="mt-3 break-all rounded-xl bg-black/20 p-3 font-mono text-[11px] text-slate-200">
+                            {acct.qr_payload}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-500">No manual UPI handles yet.</p>
+                  )}
+                </div>
+              </div>
             </div>
           </Card>
 

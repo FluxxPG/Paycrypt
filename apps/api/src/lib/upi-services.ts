@@ -102,6 +102,7 @@ export class UPIPaymentService {
     });
 
     const buildManualFallbackResponse = async () => {
+      const manualAccount = await this.selectManualUpiAccount(merchantId);
       const merchantResult = await query<{
         upi_manual_mode_enabled: boolean;
         upi_manual_vpa: string | null;
@@ -112,28 +113,45 @@ export class UPIPaymentService {
         [merchantId]
       );
       const merchant = merchantResult.rows[0];
-      if (!merchant?.upi_manual_mode_enabled || !merchant.upi_manual_vpa) {
+      const vpa = manualAccount?.vpa ?? merchant?.upi_manual_vpa ?? null;
+      const qrPayload = manualAccount?.qr_payload ?? merchant?.upi_manual_qr_url ?? null;
+      if (!merchant?.upi_manual_mode_enabled || !vpa) {
         throw new AppError(400, "manual_upi_unavailable", "Manual UPI fallback is not configured for this merchant");
       }
-      const manualIntent = `upi://pay?pa=${encodeURIComponent(merchant.upi_manual_vpa)}&pn=${encodeURIComponent("Paycrypt Merchant")}&am=${paymentData.amountFiat}&cu=${paymentData.fiatCurrency}&tn=${encodeURIComponent(paymentData.description)}`;
+      const manualIntent = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent("Paycrypt Merchant")}&am=${paymentData.amountFiat}&cu=${paymentData.fiatCurrency}&tn=${encodeURIComponent(paymentData.description)}`;
       await query(
         `update payments
-         set upi_intent_url = $2, upi_qr_code = $3, status = 'pending', upi_status = 'pending', updated_at = now()
+         set upi_provider = 'manual',
+             upi_vpa = $2,
+             upi_intent_url = $3,
+             upi_qr_code = $4,
+             status = 'pending',
+             upi_status = 'pending',
+             updated_at = now()
          where id = $1`,
-        [paymentId, manualIntent, merchant.upi_manual_qr_url ?? manualIntent]
+        [paymentId, vpa, manualIntent, qrPayload ?? manualIntent]
       );
+      if (manualAccount) {
+        await query(
+          `update upi_manual_accounts
+           set last_used_at = now(), usage_count = usage_count + 1, updated_at = now()
+           where id = $1`,
+          [manualAccount.id]
+        );
+      }
       return {
         paymentId,
         payment_id: paymentId,
         status: "pending",
         method: "upi",
         provider: "manual",
+        vpa,
         checkoutUrl: `/pay/${paymentId}`,
         checkout_url: `/pay/${paymentId}`,
         intentUrl: manualIntent,
         intent_url: manualIntent,
-        qrCode: merchant.upi_manual_qr_url ?? manualIntent,
-        qr_code: merchant.upi_manual_qr_url ?? manualIntent,
+        qrCode: qrPayload ?? manualIntent,
+        qr_code: qrPayload ?? manualIntent,
         amount: paymentData.amountFiat,
         currency: paymentData.fiatCurrency,
         expiresAt: payment.expires_at
@@ -193,6 +211,13 @@ export class UPIPaymentService {
         JSON.stringify({ ...result, routedProvider: providerConfig.providerName, providerErrors }),
         paymentId
       ]);
+
+      await query(
+        `update upi_providers
+         set last_used_at = now(), usage_count = usage_count + 1, updated_at = now()
+         where merchant_id = $1 and provider_name = $2`,
+        [merchantId, providerConfig.providerName]
+      );
 
       // Emit real-time event
       await emitPaymentEvent({
@@ -501,6 +526,9 @@ export class UPIPaymentService {
         manualModeEnabled: Boolean(merchant?.upi_manual_mode_enabled),
         manualVpa: merchant?.upi_manual_vpa ?? undefined,
         manualQrUrl: merchant?.upi_manual_qr_url ?? undefined,
+        rotationStrategy: "round_robin",
+        refreshRerouteEnabled: true,
+        maxReroutes: 3,
         allowedProviders: ["phonepe", "paytm", "razorpay", "freecharge"],
         providerPriority: {
           phonepe: 1,
@@ -522,6 +550,9 @@ export class UPIPaymentService {
       manualModeEnabled: Boolean(merchant?.upi_manual_mode_enabled),
       manualVpa: merchant?.upi_manual_vpa ?? undefined,
       manualQrUrl: merchant?.upi_manual_qr_url ?? undefined,
+      rotationStrategy: row.rotation_strategy ?? "round_robin",
+      refreshRerouteEnabled: row.refresh_reroute_enabled ?? true,
+      maxReroutes: Number(row.max_reroutes ?? 3),
       allowedProviders: row.allowed_providers,
       providerPriority: typeof row.provider_priority === 'string' 
         ? JSON.parse(row.provider_priority) 
@@ -542,7 +573,9 @@ export class UPIPaymentService {
         environment,
         priority,
         is_active,
-        is_tested
+        is_tested,
+        last_used_at,
+        usage_count
       FROM upi_providers 
       WHERE merchant_id = $1 AND is_active = true
       ORDER BY priority ASC
@@ -555,7 +588,9 @@ export class UPIPaymentService {
       environment: row.environment,
       priority: row.priority,
       isActive: row.is_active,
-      isTested: row.is_tested
+      isTested: row.is_tested,
+      lastUsedAt: row.last_used_at,
+      usageCount: Number(row.usage_count ?? 0)
     }));
   }
 
@@ -591,7 +626,10 @@ export class UPIPaymentService {
       .sort((a, b) => {
         const aPriority = settings?.providerPriority?.[a.providerName] ?? a.priority;
         const bPriority = settings?.providerPriority?.[b.providerName] ?? b.priority;
-        return aPriority - bPriority;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        const aLast = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+        const bLast = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+        return aLast - bLast;
       });
 
     if (preferredProvider && allowedProviders.has(preferredProvider)) {
@@ -605,6 +643,27 @@ export class UPIPaymentService {
     }
 
     return testedProviders;
+  }
+
+  private async selectManualUpiAccount(
+    merchantId: string,
+    input?: { excludeVpa?: string }
+  ): Promise<{ id: string; vpa: string; qr_payload: string | null } | null> {
+    const exclude = String(input?.excludeVpa ?? "").trim();
+    const result = await query<{ id: string; vpa: string; qr_payload: string | null }>(
+      `select id, vpa, qr_payload
+       from upi_manual_accounts
+       where merchant_id = $1
+         and is_active = true
+         and ($2 = '' or vpa <> $2)
+       order by
+         coalesce(last_used_at, 'epoch'::timestamptz) asc,
+         priority asc,
+         created_at asc
+       limit 1`,
+      [merchantId, exclude]
+    );
+    return result.rows[0] ?? null;
   }
 
   private async sendMerchantWebhook(merchantId: string, data: any): Promise<void> {
