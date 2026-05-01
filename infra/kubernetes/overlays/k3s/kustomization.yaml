@@ -3,5 +3,7 @@ kind: Kustomization
 resources:
   - ../../base
   - nodeports.yaml
+  - metrics-server.yaml
+  - autoscaling.yaml
 patches:
   - path: replicas.yaml

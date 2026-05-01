@@ -9,7 +9,7 @@ spec:
     kind: Deployment
     name: api
   minReplicas: 1
-  maxReplicas: 20
+  maxReplicas: 10
   metrics:
     - type: Resource
       resource:
@@ -35,7 +35,7 @@ spec:
     kind: Deployment
     name: ws
   minReplicas: 1
-  maxReplicas: 20
+  maxReplicas: 10
   metrics:
     - type: Resource
       resource:
@@ -61,7 +61,7 @@ spec:
     kind: Deployment
     name: worker
   minReplicas: 1
-  maxReplicas: 30
+  maxReplicas: 15
   metrics:
     - type: Resource
       resource:
@@ -69,3 +69,4 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+
