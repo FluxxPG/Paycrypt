@@ -61,9 +61,9 @@ REGION="${AWS_REGION}"
 TOKEN=\$(aws ssm get-parameter --name "${TOKEN_PARAM_NAME}" --with-decryption --query Parameter.Value --output text --region "\$REGION")
 
 # Ensure Kubernetes nodes have an AWS providerID so Cluster Autoscaler can map them.
-IMDS_TOKEN=\$(curl -fsS -X PUT \"http://169.254.169.254/latest/api/token\" -H \"X-aws-ec2-metadata-token-ttl-seconds: 21600\")
-IID=\$(curl -fsS -H \"X-aws-ec2-metadata-token: \${IMDS_TOKEN}\" http://169.254.169.254/latest/meta-data/instance-id)
-AZ=\$(curl -fsS -H \"X-aws-ec2-metadata-token: \${IMDS_TOKEN}\" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+IMDS_TOKEN=\$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+IID=\$(curl -fsS -H "X-aws-ec2-metadata-token: \${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/instance-id)
+AZ=\$(curl -fsS -H "X-aws-ec2-metadata-token: \${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone)
 PROVIDER_ID=\"aws:///\${AZ}/\${IID}\"
 
 curl -sfL https://get.k3s.io | K3S_URL="${K3S_SERVER_URL}" K3S_TOKEN="\$TOKEN" sh -s - agent \
